@@ -1,0 +1,10 @@
+name: docker
+on:
+  pull_request:
+    paths: ["Dockerfile", "backend/**", "frontend/**", ".github/workflows/docker.yml"]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t voicent-onboarding .
