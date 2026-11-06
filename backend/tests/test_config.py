@@ -19,7 +19,7 @@ def test_fully_set_features_are_enabled_without_warnings():
         **LOCAL, twilio_account_sid="AC1", twilio_auth_token="t", twilio_from_number="+15551234567",
         resend_api_key="re_x", resend_from="Voicent <hi@example.com>",
         aios_api_url="https://aios.example.com", aios_service_token="x" * 24,
-        supabase_url="https://p.supabase.co", supabase_service_key="k",
+        supabase_url="https://p.supabase.co", supabase_service_key="k", portal_signing_key="k" * 32,
     )
     assert s.optional_warnings() == []
     assert s.sms_enabled and s.email_enabled and s.aios_sync_enabled and s.uploads_enabled
@@ -36,3 +36,18 @@ def test_service_key_aliases(monkeypatch):
         monkeypatch.delenv(n, raising=False)
     monkeypatch.setenv("SUPABASE_SECRET_KEY", "abc")
     assert Settings.from_env().supabase_service_key == "abc"
+
+
+def test_portal_key_is_never_the_supabase_jwt_secret():
+    secret = "j" * 40
+    key = Settings(**LOCAL, supabase_jwt_secret=secret).portal_key()
+    assert key != secret and len(key) >= 32
+    assert Settings(**LOCAL, portal_signing_key="p" * 30).portal_key() == "p" * 30
+    random_a = Settings(**LOCAL).portal_key()
+    assert random_a == Settings(**LOCAL).portal_key() and len(random_a) >= 32  # stable within a process
+
+
+def test_missing_portal_key_warns_but_does_not_stop_startup():
+    s = Settings(**LOCAL)
+    assert any("PORTAL_SIGNING_KEY" in w for w in s.optional_warnings())
+    create_app(s)

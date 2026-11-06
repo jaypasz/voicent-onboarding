@@ -12,11 +12,11 @@ Plan and rationale: `plans/2026-11-06-client-onboarding-app.md` in the `jaypasz/
 
 ## State
 
-Phases 1 and 2 done: scaffold, data model, migrations with row level security, auth, the template schema and YAML loader, four presets, the six v1 step types, services and the admin API (clients, templates, onboardings, steps, comments), and `python -m app.cli seed`. Not built yet: the magic-link client portal API, file uploads, nudges, AIOS sync, the admin and portal UIs (phases 3 and 4). **Not verified: a Railway deploy, real Supabase login.**
+Phases 1, 2 and 3a done: scaffold, data model, migrations with row level security, auth, the template schema and YAML loader, four presets, the six v1 step types, services and the admin API (clients, templates, onboardings, steps, comments), `python -m app.cli seed`, the magic-link client portal API (`/api/portal`: exchange, session, view, answer, comment, upload URL), admin link controls, and file uploads to a private Supabase Storage bucket. Not built yet: the admin and portal UIs (phase 3b), nudges, AIOS sync (phase 4). **Not verified: a Railway deploy, real Supabase login, uploads against live Supabase Storage.**
 
 ## Layout
 
-- `backend/` — Python 3.13, FastAPI + SQLAlchemy 2 + Alembic. `app/` holds `main.py` (app factory), `config.py`, `db.py`, `models.py`, `auth.py`, `deps.py` (incl. `current_org`), `redact.py`, `errors.py`, `services.py` (all the rules), `schemas.py`, `cli.py`, `steps/` (one file per step type plus `registry.py`), `templates/` (`schema.json`, `loader.py`, `presets/*.yaml`), `routers/`. `alembic/` the migrations. `tests/` the pytest suite. Virtualenv in `backend/.venv`.
+- `backend/` — Python 3.13, FastAPI + SQLAlchemy 2 + Alembic. `app/` holds `main.py` (app factory), `config.py`, `db.py`, `models.py`, `auth.py`, `deps.py` (incl. `current_org`), `redact.py`, `errors.py`, `services.py` (all the rules), `portal.py` (what a client may see and do), `magic_link.py`, `ratelimit.py`, `storage.py`, `schemas.py`, `cli.py`, `steps/` (one file per step type plus `registry.py`), `templates/` (`schema.json`, `loader.py`, `presets/*.yaml`), `routers/`. `alembic/` the migrations. `tests/` the pytest suite. Virtualenv in `backend/.venv`.
 - `frontend/` — Vite 8 + React 19 + TypeScript 6, linted with oxlint, tested with Vitest. Own `package.json`.
 - One Railway service builds the `Dockerfile`: the SPA is served by FastAPI next to `/api`.
 
@@ -42,6 +42,8 @@ Frontend (from `frontend/`): `npm install`, `npm run dev` (proxies `/api` to :80
 
 - **Auth fails closed.** Every `/api` route except `/api/health` needs a Supabase user JWT (admin) or a `SERVICE_TOKENS` entry. `AUTH_DISABLED=1` only works with `APP_ENV=local`; otherwise the app refuses to start.
 - **Two audiences, two door sets.** Admin routes live under `/api` and need admin auth. Client routes live under `/api/portal` and need a session token that came from a magic link, scoped to one onboarding and one contact. A portal route must never read outside that scope.
+- **Nothing on `/api/portal` takes an onboarding id.** Which onboarding and contact is decided by the session token alone, and `deps.portal_ctx` re-checks the link row on every request, so revoking a link cuts off its sessions at once. Every failure is the same 401 (`portal.UNAVAILABLE`); a step that doesn't exist and one a client may not see are the same 404.
+- **Rate limits.** Exchange: per client address and across everyone. Writes: per link. The client address comes from `X-Forwarded-For` and can be spoofed, which is why the global limit and the per-link limit exist. In-process, so per instance: move to Redis if this ever scales out.
 - **Internal steps never reach the portal.** A step with `visibility = internal` must not appear in any portal response, comment thread or sync payload visible to a client. A test must prove it.
 - **Routers stay thin; `services.py` holds the rules.** Every service function takes `org_id` and filters by it. A row from another org is `NotFound`, never a leak (`tests/test_api.py` proves it with two orgs). Admin requests resolve their org in `deps.current_org` (a person's `org_members` row; `X-Org-Id` for service tokens when there are several orgs).
 - **A new step type is one file in `app/steps/` plus an entry in `registry.py`.** It declares its config schema, validates and cleans responses (redacting free text), and says what status an accepted answer leaves the step in. Declared-but-unbuilt types (`credential_share`, `info_video`, `payment_link`) are refused in templates until they are built.

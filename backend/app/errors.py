@@ -15,6 +15,10 @@ class NotFound(ServiceError):
     status_code = 404
 
 
+class Forbidden(ServiceError):
+    status_code = 403
+
+
 class Conflict(ServiceError):
     status_code = 409
 
