@@ -1,0 +1,12 @@
+name: Blank
+slug: blank
+description: One form step to start from.
+layout: checklist
+steps:
+  - key: details
+    type: form
+    title: Your details
+    config:
+      fields:
+        - {key: business_name, label: "Business name", type: text, required: true}
+        - {key: notes, label: "Anything we should know?", type: textarea}

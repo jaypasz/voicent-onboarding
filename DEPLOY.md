@@ -32,5 +32,7 @@ Railway passes service variables to the Docker build as build args, so the two `
 1. Create the Supabase project. Note the pooler connection string and JWKS URL.
 2. Set the variables above on a new Railway service from this repo. The container runs `alembic upgrade head` before starting.
 3. Check `https://<domain>/api/health` returns `{"ok": true}`.
-4. In Supabase, create Jay's user, then insert the first `orgs` row and an `org_members` row linking that user. (A seed command arrives with the admin API in phase 2.)
+4. In Supabase, create Jay's user (Authentication > Users) and copy their user id. Then run once, against the production database:
+   `python -m app.cli seed --org-name Voicent --org-slug voicent --admin-user-id <that id> --admin-email <email>`
+   (from a Railway shell, or locally with `DATABASE_URL` set). It creates the org, links the user to it and installs the four preset templates. Safe to run twice.
 5. Confirm row level security: the Supabase Data API with the publishable key must return no rows from any table.

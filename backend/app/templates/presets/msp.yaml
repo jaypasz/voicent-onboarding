@@ -1,0 +1,122 @@
+name: MSP or IT provider
+slug: msp
+description: Fuller onboarding for a managed service provider, with environment details, delegated access and a scope sign-off.
+layout: checklist
+nudge_after_days: 3
+sections:
+  - {key: company, title: Your company}
+  - {key: environment, title: Your environment}
+  - {key: access, title: Access}
+  - {key: security, title: Security}
+  - {key: review, title: Review}
+  - {key: kickoff, title: Kickoff}
+steps:
+  - key: company_profile
+    type: form
+    title: Company profile
+    section: company
+    assignee_role: owner
+    due_offset_days: 3
+    config:
+      fields:
+        - {key: company_name, label: "Company name", type: text, required: true}
+        - {key: website, label: "Website", type: url}
+        - {key: seats, label: "Approximate number of users you support", type: text}
+        - {key: goals, label: "What problem are we solving for you?", type: textarea, required: true}
+  - key: stakeholders
+    type: form
+    title: Who is involved
+    section: company
+    assignee_role: owner
+    due_offset_days: 3
+    config:
+      fields:
+        - {key: it_contact, label: "IT contact (name, email, phone)", type: text, required: true}
+        - {key: billing_contact, label: "Billing contact (name and email)", type: text, required: true}
+        - {key: security_contact, label: "Security or compliance contact", type: text}
+  - key: environment_overview
+    type: form
+    title: Your environment
+    section: environment
+    assignee_role: it
+    due_offset_days: 5
+    config:
+      fields:
+        - {key: identity, label: "Identity provider", type: select, options: [Microsoft 365, Google Workspace, Other], required: true}
+        - {key: phone_system, label: "Phone system", type: text, required: true}
+        - {key: ticketing, label: "Ticketing or PSA tool", type: text}
+        - {key: sites, label: "Number of sites", type: text}
+        - {key: notes, label: "Anything unusual about the setup?", type: textarea}
+  - key: network_docs
+    type: upload
+    title: Network or call-flow documents
+    section: environment
+    assignee_role: it
+    due_offset_days: 7
+    config:
+      prompt: Diagrams or exports help us avoid surprises. Don't include passwords.
+      accept: [pdf, png, jpg, docx, xlsx, csv]
+      min_files: 0
+      max_files: 10
+      max_mb: 25
+  - key: m365_delegated
+    type: connect
+    title: Grant delegated access (Microsoft 365)
+    section: access
+    assignee_role: it
+    due_offset_days: 7
+    config:
+      provider: m365
+      label: Microsoft 365 partner relationship
+      access_mode: delegated
+      instructions: Accept our delegated admin relationship invitation, then tell us the tenant name.
+  - key: dns_access
+    type: connect
+    title: Grant DNS access
+    section: access
+    assignee_role: it
+    due_offset_days: 7
+    config:
+      provider: dns
+      label: DNS or registrar
+      access_mode: delegated
+      instructions: Add us as a delegate on your registrar or DNS host. Please don't send passwords.
+  - key: security_requirements
+    type: form
+    title: Security requirements
+    section: security
+    assignee_role: it
+    due_offset_days: 7
+    config:
+      fields:
+        - {key: frameworks, label: "Frameworks you must follow", type: multiselect, options: [HIPAA, SOC 2, PCI DSS, CMMC, None]}
+        - {key: recording_policy, label: "Call recording policy", type: textarea}
+        - {key: data_residency, label: "Data residency requirements", type: text}
+  - key: scope_approval
+    type: approval
+    title: Approve the scope
+    section: review
+    assignee_role: owner
+    due_offset_days: 10
+    config:
+      prompt: Confirm the scope of work before we start.
+      deliverable: {kind: link, url: https://example.com/scope}
+  - key: kickoff_call
+    type: book_call
+    title: Book the kickoff call
+    section: kickoff
+    assignee_role: owner
+    due_offset_days: 4
+    config: {url: "https://example.com/book", duration_minutes: 60}
+  - key: internal_review
+    type: internal_task
+    title: Review environment and security answers
+    section: environment
+    due_offset_days: 7
+    config: {checklist: [Check identity provider and phone system, Flag compliance gaps, Draft the scope]}
+  - key: provision
+    type: internal_task
+    title: Provision the workspace
+    section: access
+    due_offset_days: 10
+    config: {checklist: [Create tenant and workspace, Connect integrations, Run a test call]}
