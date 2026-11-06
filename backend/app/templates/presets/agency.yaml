@@ -1,0 +1,103 @@
+name: Agency or implementer
+slug: agency
+description: Kickoff for an agency or voice AI developer reselling under their own brand.
+layout: checklist
+nudge_after_days: 3
+sections:
+  - {key: company, title: Your company}
+  - {key: access, title: Access and tools}
+  - {key: brand, title: Brand}
+  - {key: review, title: Review}
+  - {key: kickoff, title: Kickoff}
+steps:
+  - key: company_profile
+    type: form
+    title: Company profile
+    section: company
+    assignee_role: owner
+    due_offset_days: 3
+    config:
+      fields:
+        - {key: company_name, label: "Company name", type: text, required: true}
+        - {key: website, label: "Website", type: url}
+        - {key: client_count, label: "How many clients do you serve today?", type: text}
+        - {key: goals, label: "What do you want to achieve in the next 90 days?", type: textarea, required: true}
+  - key: stakeholders
+    type: form
+    title: Who is involved
+    section: company
+    assignee_role: owner
+    due_offset_days: 3
+    config:
+      fields:
+        - {key: technical_contact, label: "Technical contact (name and email)", type: text, required: true}
+        - {key: billing_contact, label: "Billing contact (name and email)", type: text}
+        - {key: approvers, label: "Who signs off on scripts and flows?", type: text, required: true}
+  - key: tool_stack
+    type: form
+    title: Your current tools
+    section: access
+    assignee_role: it
+    due_offset_days: 4
+    config:
+      fields:
+        - {key: voice_platforms, label: "Voice platforms in use", type: multiselect, options: [Retell, Vapi, Bland, Twilio, ElevenLabs, Other]}
+        - {key: crm, label: "CRM", type: select, options: [GoHighLevel, HubSpot, Salesforce, Other, None]}
+        - {key: other_tools, label: "Anything else we should connect to?", type: textarea}
+  - key: ghl_access
+    type: connect
+    title: Connect GoHighLevel
+    section: access
+    assignee_role: it
+    due_offset_days: 5
+    config: {provider: ghl, label: GoHighLevel, access_mode: oauth}
+  - key: retell_access
+    type: connect
+    title: Connect Retell
+    section: access
+    assignee_role: it
+    due_offset_days: 5
+    config:
+      provider: retell
+      label: Retell
+      access_mode: delegated
+      instructions: Invite us to your Retell workspace, then tell us the workspace name.
+  - key: brand_assets
+    type: upload
+    title: Brand assets
+    section: brand
+    assignee_role: owner
+    due_offset_days: 5
+    config:
+      prompt: Logo files, colours, and any existing scripts.
+      accept: [png, jpg, jpeg, pdf, docx]
+      min_files: 0
+      max_files: 10
+  - key: call_flow_approval
+    type: approval
+    title: Approve the first call flow
+    section: review
+    assignee_role: owner
+    due_offset_days: 10
+    config:
+      prompt: Review the first workflow before it goes live.
+      deliverable: {kind: link, url: https://example.com/review}
+  - key: kickoff_call
+    type: book_call
+    title: Book the kickoff call
+    section: kickoff
+    assignee_role: owner
+    due_offset_days: 4
+    config: {url: "https://example.com/book", duration_minutes: 45}
+  - key: review_intake
+    type: internal_task
+    title: Review the intake answers
+    section: company
+    due_offset_days: 4
+    config: {checklist: [Check goals against the offer, Note the white-label fit, Flag anything unclear]}
+  - key: create_workspace
+    type: internal_task
+    title: Create the workspace and connect the integrations
+    section: access
+    due_offset_days: 7
+    config: {checklist: [Create tenant and workspace, Connect GHL and Retell, Load the starter templates]}

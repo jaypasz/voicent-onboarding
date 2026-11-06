@@ -1,0 +1,65 @@
+name: Trades and local service
+slug: trades
+description: Short, phone-first onboarding for a plumber, electrician or similar small business. One question at a time.
+layout: focus
+nudge_after_days: 2
+steps:
+  - key: business_basics
+    type: form
+    title: About your business
+    due_offset_days: 2
+    config:
+      intro: A few quick questions so your phone line sounds like you.
+      fields:
+        - {key: business_name, label: "Business name", type: text, required: true}
+        - {key: owner_name, label: "Your name", type: text, required: true}
+        - {key: main_phone, label: "Best phone number", type: phone, required: true}
+        - {key: email, label: "Email address", type: email, required: true}
+  - key: services_and_hours
+    type: form
+    title: What you do and when
+    due_offset_days: 3
+    config:
+      fields:
+        - {key: services, label: "What jobs do you take?", type: textarea, required: true, help: "For example: leaks, water heaters, drain clearing."}
+        - {key: service_area, label: "Where do you work?", type: textarea, required: true}
+        - {key: hours, label: "Your hours", type: textarea, required: true}
+        - {key: emergency, label: "Do you take emergency calls?", type: select, options: ["Yes, 24/7", "Yes, with a fee", "No"], required: true}
+  - key: logo
+    type: upload
+    title: Your logo
+    due_offset_days: 3
+    config:
+      prompt: A photo of your logo or a van is fine.
+      accept: [png, jpg, jpeg, webp, pdf]
+      min_files: 0
+      max_files: 2
+  - key: google_business
+    type: connect
+    title: Share your Google Business Profile
+    due_offset_days: 4
+    config:
+      provider: google_business
+      label: Google Business Profile
+      access_mode: delegated
+      instructions: Add us as a manager on your profile, then tell us which profile it is.
+  - key: greeting_approval
+    type: approval
+    title: Approve your greeting
+    due_offset_days: 7
+    config:
+      prompt: This is what callers will hear first.
+      deliverable: {kind: text, text: "Thanks for calling. How can we help today?"}
+  - key: kickoff_call
+    type: book_call
+    title: Book a quick kickoff call
+    due_offset_days: 5
+    config:
+      url: https://example.com/book
+      duration_minutes: 20
+  - key: build_agent
+    type: internal_task
+    title: Build and test the voice agent
+    due_offset_days: 7
+    config:
+      checklist: [Create the agent, Load services and hours, Test with 3 sample calls, Send greeting for approval]

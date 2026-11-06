@@ -35,11 +35,15 @@ One Railway service builds the Dockerfile and serves the React SPA and `/api`.
 }
 ```
 
-`show_if` is stored and ignored until branching ships. The JSON Schema for this document arrives in phase 2 (`app/templates/schema.json`). The GUI builder edits this same document.
+`show_if` is stored and ignored until branching ships. The JSON Schema for this document is `backend/app/templates/schema.json`; `app/templates/loader.py` validates it (reporting every problem, not just the first), fills defaults, and converts to and from YAML. Saving a changed document adds a `template_versions` row; saving an unchanged one adds nothing. The GUI builder edits this same document, and `POST /api/templates/validate` lets it check a draft with the exact rules the YAML import uses.
 
 ## Step types
 
-A registry; each type declares its config schema, response schema, validation, completion rule and side effects. v1: `form`, `upload`, `connect`, `book_call`, `approval`, `internal_task`. Declared but not built: `credential_share`, `info_video`, `payment_link`.
+A registry (`app/steps/registry.py`); each type declares its config schema, validates and cleans responses, and says what status an accepted answer leaves the step in (`resulting_status`). Side effects such as AIOS comments arrive with the sync in a later phase. v1: `form`, `upload`, `connect`, `book_call`, `approval`, `internal_task`. Declared but not built: `credential_share`, `info_video`, `payment_link`.
+
+## Admin API (phase 2)
+
+`/api/clients` (+ contacts), `/api/templates` (list, save JSON, import/export YAML with `dry_run`, validate, step types, install presets, archive), `/api/onboardings` (create from a template version, send, pause, resume, archive, answer or complete or skip or reopen a step, comments). Due dates start when an onboarding is sent, because template offsets are relative to kickoff. The client portal (`/api/portal`) is phase 3.
 
 ## Integrations (later phases)
 

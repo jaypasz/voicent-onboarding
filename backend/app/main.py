@@ -11,7 +11,8 @@ from sqlalchemy.orm import sessionmaker
 from . import models  # noqa: F401  (registers the tables on Base.metadata)
 from .config import Settings
 from .db import Base, make_engine
-from .routers import health
+from .errors import ServiceError
+from .routers import clients, health, onboardings, templates
 
 log = logging.getLogger("uvicorn.error")
 
@@ -42,8 +43,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["Authorization", "Content-Type"],
     )
 
-    app.include_router(health.router, prefix="/api")
+    for r in (health.router, clients.router, templates.router, onboardings.router):
+        app.include_router(r, prefix="/api")
     _serve_frontend(app, settings.static_dir)
+
+    @app.exception_handler(ServiceError)
+    async def _service_error(_: Request, exc: ServiceError):
+        body = {"detail": exc.message}
+        if exc.problems:
+            body["problems"] = exc.problems
+        return JSONResponse(body, status_code=exc.status_code)
 
     @app.exception_handler(LookupError)
     async def _lookup(_: Request, exc: LookupError):
