@@ -14,4 +14,6 @@ uvicorn app.main:create_app --factory --reload
 cd frontend && npm install && npm run dev
 ```
 
-Status: phases 1, 2 and 3a (scaffold, data model, auth; template engine, step types, admin API; client portal API with magic links, rate limits and uploads). The UIs, nudges and AIOS sync follow.
+Status: phases 1 to 3 (scaffold, data model, auth; template engine, step types, admin API; client portal API; client portal and admin UIs). Nudges, AIOS sync and the template GUI builder follow.
+
+Local try-out with no login: start the backend with `APP_ENV=local AUTH_DISABLED=1`, run `python -m app.cli seed --org-name Local --org-slug local`, then `npm run dev` in `frontend/`.

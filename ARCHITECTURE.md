@@ -51,6 +51,10 @@ A registry (`app/steps/registry.py`); each type declares its config schema, vali
 
 Uploads: the server checks name, type, size and step limits, then returns a signed Supabase Storage URL; the browser uploads straight to it. An upload answer is accepted only for files that belong to that step and exist in storage.
 
+## Frontend (phase 3b)
+
+One Vite bundle, two audiences. **Client portal** (`/c/:token`): the link token is exchanged for a 30-minute in-memory session; the page shows either the *focus* layout (one step per screen, dots to jump, the next open step comes up after each save, a finished screen when the client's part is done) or the *checklist* layout (sections, each step collapsible, who it is for, due dates), chosen by the template. Each step type has one renderer (`form`, `upload`, `connect`, `book_call`, `approval`). **Admin** (`/`): onboardings list with status filters, onboarding detail (every step with answers in words, files via short-lived links, comments with a "visible to the client" switch, pause/resume/archive, link controls; links appear once after sending), clients and contacts (text consent needs a recorded source), templates (YAML check/save/download), new onboarding.
+
 ## Integrations (later phases)
 
 - **AIOS:** one project per onboarding and a task per step through the AIOS REST API with a dedicated service token. De-duplicated by the stored task ID and the task `link`. A sync failure never blocks the client.
