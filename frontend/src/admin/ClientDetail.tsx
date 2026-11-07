@@ -4,6 +4,7 @@ import { useAddContact, useClients, useOnboardings, useUpdateClient, useUpdateCo
 import { ApiError } from '../api/http'
 import type { Contact } from '../api/types'
 import { Banner } from '../components/Banner'
+import { LoadError } from '../components/LoadError'
 import { OnboardingBadge } from '../components/StatusBadge'
 
 function ContactRow({ clientId, c }: { clientId: string; c: Contact }) {
@@ -42,6 +43,7 @@ export default function ClientDetail() {
   const [error, setError] = useState<string | null>(null)
 
   if (clients.isPending) return <p>Loading…</p>
+  if (clients.isError) return <LoadError error={clients.error} what="this client" />
   if (!client) return <Banner kind="error">Client not found. <Link to="/clients">Back to clients</Link></Banner>
 
   async function addContact(e: FormEvent) {

@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useClients, useCreateOnboarding, useTemplates } from '../api/admin'
 import { ApiError } from '../api/http'
 import { Banner } from '../components/Banner'
+import { LoadError } from '../components/LoadError'
 
 export default function NewOnboardingPage() {
   const nav = useNavigate()
@@ -26,12 +27,14 @@ export default function NewOnboardingPage() {
     }
   }
 
-  const noClients = clients.data?.length === 0
-  const noTemplates = templates.data?.length === 0
+  const noClients = clients.isSuccess && clients.data.length === 0
+  const noTemplates = templates.isSuccess && templates.data.length === 0
   return (
     <form onSubmit={submit} className="stack narrow-form">
       <h1>New onboarding</h1>
       {error && <Banner kind="error">{error}</Banner>}
+      {clients.isError && <LoadError error={clients.error} what="clients" />}
+      {templates.isError && <LoadError error={templates.error} what="templates" />}
       {noClients && <Banner>Add a client first. <Link to="/clients">Clients</Link></Banner>}
       {noTemplates && <Banner>No templates yet. <Link to="/templates">Install the presets</Link></Banner>}
       <label className="field-group">

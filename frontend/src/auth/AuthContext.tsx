@@ -7,6 +7,7 @@ interface AuthState {
   ready: boolean
   signedIn: boolean
   email: string
+  userId: string
   signIn: (email: string, password: string) => Promise<string | null>
   signOut: () => Promise<void>
 }
@@ -33,6 +34,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ready,
       signedIn: localMode || session !== null,
       email: localMode ? 'local mode' : (session?.user.email ?? ''),
+      userId: session?.user.id ?? '',
       signIn: async (email, password) => {
         if (!supabase) return null
         const { error } = await supabase.auth.signInWithPassword({ email, password })
@@ -45,6 +47,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [ready, session],
   )
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
+}
+
+/** The same as useAuth, but null outside the provider (error screens may render anywhere). */
+export function useAuthMaybe(): AuthState | null {
+  return useContext(Ctx)
 }
 
 export function useAuth(): AuthState {
