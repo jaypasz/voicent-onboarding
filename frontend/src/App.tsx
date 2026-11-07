@@ -1,24 +1,41 @@
-import { useEffect, useState } from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { BrowserRouter, Route, Routes } from 'react-router'
+import AdminLayout from './admin/AdminLayout'
+import ClientDetail from './admin/ClientDetail'
+import ClientsPage from './admin/ClientsPage'
+import NewOnboardingPage from './admin/NewOnboardingPage'
+import OnboardingDetail from './admin/OnboardingDetail'
+import OnboardingsPage from './admin/OnboardingsPage'
+import TemplatesPage from './admin/TemplatesPage'
+import { AuthProvider, useAuth } from './auth/AuthContext'
+import Login from './auth/Login'
+import PortalPage from './portal/PortalPage'
 
-type Health = 'checking' | 'up' | 'down'
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } })
 
-// Phase 1 shell: proves the build, the /api proxy and the server are wired together.
-// The client portal (/c/:token) and the admin app arrive in later phases.
+function AdminGate() {
+  const { ready, signedIn } = useAuth()
+  if (!ready) return <main className="narrow"><p>Loading…</p></main>
+  return signedIn ? <AdminLayout /> : <Login />
+}
+
 export default function App() {
-  const [health, setHealth] = useState<Health>('checking')
-
-  useEffect(() => {
-    fetch('/api/health')
-      .then((r) => setHealth(r.ok ? 'up' : 'down'))
-      .catch(() => setHealth('down'))
-  }, [])
-
   return (
-    <main style={{ maxWidth: 560, margin: '4rem auto', padding: '0 1rem', fontFamily: 'system-ui, sans-serif' }}>
-      <h1>Voicent Onboarding</h1>
-      <p>
-        Server: {health === 'checking' ? 'checking…' : health === 'up' ? '✓ up' : '✗ not reachable'}
-      </p>
-    </main>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/c/:token" element={<PortalPage />} />
+          <Route element={<AuthProvider><AdminGate /></AuthProvider>}>
+            <Route index element={<OnboardingsPage />} />
+            <Route path="onboardings/:id" element={<OnboardingDetail />} />
+            <Route path="clients" element={<ClientsPage />} />
+            <Route path="clients/:id" element={<ClientDetail />} />
+            <Route path="templates" element={<TemplatesPage />} />
+            <Route path="new" element={<NewOnboardingPage />} />
+            <Route path="*" element={<main className="narrow"><h1>Not found</h1></main>} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </QueryClientProvider>
   )
 }
