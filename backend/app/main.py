@@ -12,7 +12,9 @@ from . import models  # noqa: F401  (registers the tables on Base.metadata)
 from .config import Settings
 from .db import Base, make_engine
 from .errors import ServiceError
-from .routers import clients, health, onboardings, templates
+from .ratelimit import RateLimiter
+from .routers import clients, health, onboardings, portal, templates
+from .storage import Storage
 
 log = logging.getLogger("uvicorn.error")
 
@@ -35,6 +37,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.engine = engine
     app.state.sessionmaker = sessionmaker(engine, expire_on_commit=False)
+    app.state.storage = Storage(settings) if settings.uploads_enabled else None
+    app.state.limit_exchange_ip = RateLimiter(settings.rate_exchange_per_ip)
+    app.state.limit_exchange_all = RateLimiter(settings.rate_exchange_global)
+    app.state.limit_writes = RateLimiter(settings.rate_writes_per_link)
 
     app.add_middleware(
         CORSMiddleware,
@@ -43,7 +49,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["Authorization", "Content-Type"],
     )
 
-    for r in (health.router, clients.router, templates.router, onboardings.router):
+    for r in (health.router, clients.router, templates.router, onboardings.router, portal.router):
         app.include_router(r, prefix="/api")
     _serve_frontend(app, settings.static_dir)
 

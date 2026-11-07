@@ -60,3 +60,27 @@ Auth = Depends(current_actor)
 Org = Depends(current_org)
 
 __all__ = ["Actor", "Auth", "Db", "Org", "Session"]
+
+
+# ---------------------------------------------------------------- the client side
+
+def portal_ctx(request: Request, db: Session = Depends(get_db)):
+    """The client behind a portal session token. Every failure is the same 401, so nothing is learned from it."""
+    from . import portal
+
+    auth = request.headers.get("Authorization", "")
+    token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+    ctx = portal.build_ctx(db, request.app.state.settings, token) if token else None
+    if ctx is None:
+        raise HTTPException(401, portal.UNAVAILABLE, headers={"WWW-Authenticate": "Bearer"})
+    return ctx
+
+
+def limit_writes(request: Request, ctx) -> None:
+    """At most N portal writes a minute per link. Keyed on the link, which a caller can't spoof."""
+    limiter = request.app.state.limit_writes
+    if not limiter.allow(ctx.link.id):
+        raise HTTPException(429, "Too many requests. Try again in a minute.", headers={"Retry-After": str(limiter.retry_after(ctx.link.id))})
+
+
+PortalCtx = Depends(portal_ctx)

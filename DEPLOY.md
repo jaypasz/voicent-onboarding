@@ -19,8 +19,10 @@ Optional (each switches off with a warning when half-set):
 
 | Variable | Feature |
 |---|---|
-| `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `UPLOAD_BUCKET` | File uploads to a **private** bucket. Create the bucket first |
-| `LINK_TTL_DAYS` | Magic link lifetime, default 30 |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `UPLOAD_BUCKET` | File uploads to a **private** bucket (default name `onboarding-files`). Create the bucket first, and set its file size limit and allowed types there as a second line of defence. Not verified against live Supabase yet |
+| `PORTAL_SIGNING_KEY` | Random, 24+ chars. Signs client sessions. Without it a random key is used and clients reopen their link after every restart |
+| `LINK_TTL_DAYS`, `SESSION_TTL_MINUTES` | Magic link lifetime (default 30 days) and client session lifetime (default 30 minutes) |
+| `RATE_EXCHANGE_PER_IP`, `RATE_EXCHANGE_GLOBAL`, `RATE_WRITES_PER_LINK` | Portal rate limits per minute (defaults 20, 300, 60) |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | SMS nudges. Needs a number registered for A2P 10DLC before real clients |
 | `RESEND_API_KEY`, `RESEND_FROM` | Email nudges. `RESEND_FROM` must use a domain verified in Resend |
 | `AIOS_API_URL`, `AIOS_SERVICE_TOKEN` | Sync into the AIOS app. Give this service its own entry in the AIOS app's `SERVICE_TOKENS` so it can be rotated alone |

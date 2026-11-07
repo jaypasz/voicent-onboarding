@@ -12,6 +12,15 @@ def _csv(value: str) -> list[str]:
 SERVICE_KEY_NAMES = ("SUPABASE_SERVICE_KEY", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY")
 
 
+_PROCESS_KEY = ""
+
+
+def _make_process_key(value: str) -> str:
+    global _PROCESS_KEY
+    _PROCESS_KEY = value
+    return value
+
+
 @dataclass(frozen=True)
 class Settings:
     """Everything the app reads from the environment, in one place."""
@@ -32,8 +41,16 @@ class Settings:
     supabase_url: str = ""
     supabase_service_key: str = ""
     upload_bucket: str = "onboarding-files"
-    # Magic links.
+    # Magic links and the short-lived portal session they are exchanged for.
     link_ttl_days: int = 30
+    session_ttl_minutes: int = 30
+    # Signs portal session tokens. Unset: derived from SUPABASE_JWT_SECRET if there is one, else random per process
+    # (clients then reopen their link after a restart).
+    portal_signing_key: str = ""
+    # Portal rate limits, per minute. Exchange is limited per client address and across everyone; writes per link.
+    rate_exchange_per_ip: int = 20
+    rate_exchange_global: int = 300
+    rate_writes_per_link: int = 60
     # Nudges. SMS through Twilio, email through Resend. Either can be left unset.
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
@@ -58,9 +75,24 @@ class Settings:
             out.append("Email nudges: set both RESEND_API_KEY and RESEND_FROM. Email is off until then.")
         if bool(self.aios_api_url) != bool(self.aios_service_token):
             out.append("AIOS sync: set both AIOS_API_URL and AIOS_SERVICE_TOKEN. Sync is off until then.")
+        if not self.portal_signing_key and not self.supabase_jwt_secret:
+            out.append("Client sessions: set PORTAL_SIGNING_KEY so portal sessions survive a restart. Using a random key for now.")
+        if self.portal_signing_key and len(self.portal_signing_key) < 24:
+            out.append("Client sessions: PORTAL_SIGNING_KEY is shorter than 24 characters. Using a random key until it is longer.")
         if self.aios_api_url and not self.aios_api_url.startswith("https://"):
             out.append("AIOS sync: AIOS_API_URL must be an https:// URL. Sync is off until it is.")
         return out
+
+    def portal_key(self) -> str:
+        """The key that signs portal session tokens. Never the same value as the Supabase JWT secret."""
+        import hashlib
+        import secrets
+
+        if len(self.portal_signing_key) >= 24:
+            return self.portal_signing_key
+        if self.supabase_jwt_secret:
+            return hashlib.sha256(("portal-session|" + self.supabase_jwt_secret).encode()).hexdigest()
+        return _PROCESS_KEY or _make_process_key(secrets.token_hex(32))
 
     @property
     def uploads_enabled(self) -> bool:
@@ -95,6 +127,11 @@ class Settings:
             supabase_service_key=next((v for n in SERVICE_KEY_NAMES if (v := e(n, "").strip())), ""),
             upload_bucket=e("UPLOAD_BUCKET", "onboarding-files"),
             link_ttl_days=int(e("LINK_TTL_DAYS", "30")),
+            session_ttl_minutes=int(e("SESSION_TTL_MINUTES", "30")),
+            portal_signing_key=e("PORTAL_SIGNING_KEY", "").strip(),
+            rate_exchange_per_ip=int(e("RATE_EXCHANGE_PER_IP", "20")),
+            rate_exchange_global=int(e("RATE_EXCHANGE_GLOBAL", "300")),
+            rate_writes_per_link=int(e("RATE_WRITES_PER_LINK", "60")),
             twilio_account_sid=e("TWILIO_ACCOUNT_SID", "").strip(),
             twilio_auth_token=e("TWILIO_AUTH_TOKEN", "").strip(),
             twilio_from_number=e("TWILIO_FROM_NUMBER", "").strip(),
@@ -119,3 +156,7 @@ class Settings:
                 raise RuntimeError("Each service token must be at least 24 characters.")
         if self.link_ttl_days < 1:
             raise RuntimeError("LINK_TTL_DAYS must be at least 1.")
+        if self.session_ttl_minutes < 1:
+            raise RuntimeError("SESSION_TTL_MINUTES must be at least 1.")
+        if min(self.rate_exchange_per_ip, self.rate_exchange_global, self.rate_writes_per_link) < 1:
+            raise RuntimeError("Rate limits must be at least 1 per minute.")

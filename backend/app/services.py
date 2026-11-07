@@ -297,7 +297,7 @@ def latest_response(step: m.Step) -> m.Response | None:
     return step.responses[-1] if step.responses else None
 
 
-def submit_step(db: Session, org_id: str, onboarding_id: str, key: str, data, *, submitted_by: str, actor_kind: str = "admin") -> m.Step:
+def submit_step(db: Session, org_id: str, onboarding_id: str, key: str, data, *, submitted_by: str, actor_kind: str = "admin", storage=None) -> m.Step:
     """Record an answer as a new revision and move the step to whatever the type says it now is."""
     ob, step = _step(db, org_id, onboarding_id, key)
     if actor_kind == "client" and (ob.status != "active" or step.visibility != "client"):
@@ -308,11 +308,33 @@ def submit_step(db: Session, org_id: str, onboarding_id: str, key: str, data, *,
     cleaned, problems = stype.validate_response(_step_config(ob, key), data)
     if problems:
         raise Invalid("The answer has problems.", problems)
+    if step.type == "upload":
+        _check_uploaded_files(step, cleaned, _step_config(ob, key), storage)
     step.responses.append(m.Response(
         org_id=org_id, revision=len(step.responses) + 1, data=cleaned, submitted_by=submitted_by, submitted_at=now()))
     _set_step_status(ob, step, stype.resulting_status(_step_config(ob, key), cleaned))
     _after_change(db, ob)
     return step
+
+
+def _check_uploaded_files(step: m.Step, cleaned: dict, config: dict, storage) -> None:
+    """Every file named in an upload answer must belong to this step and, when storage is on, really be there."""
+    owned = {f.id: f for f in step.files}
+    if any(i not in owned for i in cleaned.get("file_ids", [])):
+        raise Invalid("Some of those files don't belong to this step.")
+    if storage is None:
+        return
+    limit = config.get("max_mb", 10) * 1024 * 1024
+    for i in cleaned.get("file_ids", []):
+        f = owned[i]
+        info = storage.info(f.storage_path)
+        if info is None:
+            raise Invalid(f"'{f.name}' hasn't finished uploading.")
+        size = info.get("size") if isinstance(info, dict) else None
+        if isinstance(size, int):
+            if size > limit:
+                raise Invalid(f"'{f.name}' is larger than {config.get('max_mb', 10)} MB.")
+            f.size = size
 
 
 def complete_step(db: Session, org_id: str, onboarding_id: str, key: str) -> m.Step:

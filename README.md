@@ -14,4 +14,4 @@ uvicorn app.main:create_app --factory --reload
 cd frontend && npm install && npm run dev
 ```
 
-Status: phases 1 and 2 (scaffold, data model, auth; template engine, step types, admin API). The client portal, nudges, AIOS sync and the UIs follow.
+Status: phases 1, 2 and 3a (scaffold, data model, auth; template engine, step types, admin API; client portal API with magic links, rate limits and uploads). The UIs, nudges and AIOS sync follow.

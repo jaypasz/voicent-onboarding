@@ -43,7 +43,13 @@ A registry (`app/steps/registry.py`); each type declares its config schema, vali
 
 ## Admin API (phase 2)
 
-`/api/clients` (+ contacts), `/api/templates` (list, save JSON, import/export YAML with `dry_run`, validate, step types, install presets, archive), `/api/onboardings` (create from a template version, send, pause, resume, archive, answer or complete or skip or reopen a step, comments). Due dates start when an onboarding is sent, because template offsets are relative to kickoff. The client portal (`/api/portal`) is phase 3.
+`/api/clients` (+ contacts), `/api/templates` (list, save JSON, import/export YAML with `dry_run`, validate, step types, install presets, archive), `/api/onboardings` (create from a template version, send, pause, resume, archive, answer or complete or skip or reopen a step, comments). Due dates start when an onboarding is sent, because template offsets are relative to kickoff. Admin link controls: `POST /api/onboardings/{id}/send` issues one link per contact and returns the URLs once; `/links` lists, issues, revokes and extends them; `/files/{id}/url` gives a short-lived download link.
+
+## Client portal API (phase 3a)
+
+`POST /api/portal/exchange {token}` swaps a link token (stored only as a SHA-256 hash) for a 30-minute session (HS256, audience `portal`, signed with `PORTAL_SIGNING_KEY`, never the Supabase secret). Then `GET /api/portal/onboarding`, `PUT /api/portal/steps/{key}`, `POST /steps/{key}/comments`, `POST /steps/{key}/upload-url`, `POST /api/portal/refresh`. A client sees client-visible steps only and nothing derived from internal ones (no counts, sections, comments or template document). In the `focus` layout they see only their own and unassigned steps; in `checklist` they see everyone's but can write only their own and unassigned steps.
+
+Uploads: the server checks name, type, size and step limits, then returns a signed Supabase Storage URL; the browser uploads straight to it. An upload answer is accepted only for files that belong to that step and exist in storage.
 
 ## Integrations (later phases)
 
