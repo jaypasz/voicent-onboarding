@@ -67,3 +67,33 @@ def test_postgres_migration_enables_rls_on_every_table(monkeypatch):
         command.check(cfg())
     finally:
         command.downgrade(cfg(), "base")
+
+
+def test_upgrading_a_database_that_already_has_data_keeps_it_and_fills_in_the_new_columns(tmp_path, monkeypatch):
+    """Your deployed database has rows from before the reminders and AIOS sync. The migration must keep them and give the new
+    NOT NULL columns sensible values (every existing sent onboarding then counts as 'not yet synced')."""
+    url = f"sqlite:///{tmp_path / 'old.db'}"
+    monkeypatch.setenv("DATABASE_URL", url)
+    command.upgrade(cfg(), "0002")
+    engine = make_engine(url)
+    with engine.begin() as conn:
+        t = "2026-11-06 12:00:00"
+        conn.execute(text(f"insert into orgs (id, name, slug, created_at, updated_at) values ('o1', 'V', 'v', '{t}', '{t}')"))
+        conn.execute(text(f"insert into clients (id, org_id, name, kind, status, notes, created_at, updated_at) values ('c1', 'o1', 'Acme', 'trades', 'active', '', '{t}', '{t}')"))
+        conn.execute(text(
+            f"insert into onboardings (id, org_id, client_id, title, layout, status, document, last_activity_at, nudges_paused, created_at, updated_at) "
+            f"values ('ob1', 'o1', 'c1', 'Kickoff', 'focus', 'active', '{{}}', '{t}', 0, '{t}', '{t}')"))
+        conn.execute(text(
+            f"insert into steps (id, org_id, onboarding_id, key, type, title, section, position, visibility, status, created_at, updated_at) "
+            f"values ('s1', 'o1', 'ob1', 'basics', 'form', 'Basics', '', 0, 'client', 'pending', '{t}', '{t}')"))
+    command.upgrade(cfg(), "head")
+    with engine.connect() as conn:
+        client = conn.execute(text("select timezone from clients where id = 'c1'")).one()
+        ob = conn.execute(text("select sync_version, synced_version, attention, aios_status, aios_project_id from onboardings where id = 'ob1'")).one()
+        step = conn.execute(text("select aios_status, aios_comment_revision from steps where id = 's1'")).one()
+    assert client.timezone == "America/New_York"
+    assert (ob.sync_version, ob.synced_version) == (1, 0)  # dirty, so the next pass syncs it
+    assert ob.attention is None and ob.aios_status is None and ob.aios_project_id is None
+    assert step.aios_status is None and step.aios_comment_revision == 0
+    command.downgrade(cfg(), "0002")  # and it can be undone
+    command.upgrade(cfg(), "head")

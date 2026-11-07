@@ -12,6 +12,8 @@ import { ProgressBar } from '../components/ProgressBar'
 import { OnboardingBadge, StepBadge } from '../components/StatusBadge'
 import { dueLabel, formatDateTime } from '../lib/format'
 import StepResponse from './StepResponse'
+import AiosPanel from './AiosPanel'
+import RemindersPanel from './RemindersPanel'
 
 function errText(e: unknown): string {
   return e instanceof ApiError ? [e.message, ...e.problems].join(' ') : 'That did not work.'
@@ -202,6 +204,8 @@ export default function OnboardingDetail() {
         {o.status === 'paused' && <button className="btn btn-primary" onClick={() => run(() => act.mutateAsync('resume'))}>Resume</button>}
         {o.status !== 'archived' && <button className="btn" onClick={() => window.confirm('Archive this onboarding? Client links stop working.') && run(() => act.mutateAsync('archive'))}>Archive</button>}
       </div>
+      {o.attention === 'nudges_exhausted' && <Banner kind="warn"><strong>Needs you.</strong> This client hasn't replied to the reminders, and they have stopped. A call or a message from you might help.</Banner>}
+      {o.attention === 'unreachable' && <Banner kind="warn"><strong>Needs you.</strong> There's no email address or consented phone number to reach this client on, so reminders can't go out. <Link to={`/clients/${o.client_id}`}>Add one on the client page</Link>.</Banner>}
       {o.status === 'draft' && contacts.length === 0 && <Banner kind="warn">This client has no contacts yet, so there is nobody to send a link to. <Link to={`/clients/${o.client_id}`}>Add a contact</Link>.</Banner>}
       {o.status === 'draft' && <Banner>This is a draft. The client can't see anything until you send it.</Banner>}
 
@@ -213,6 +217,8 @@ export default function OnboardingDetail() {
       ))}
 
       <LinksPanel id={id} contacts={contacts} issued={issued} onIssued={setIssued} />
+      <RemindersPanel ob={o} />
+      <AiosPanel ob={o} />
     </div>
   )
 }

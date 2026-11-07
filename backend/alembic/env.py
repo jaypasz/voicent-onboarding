@@ -23,10 +23,20 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     engine = make_engine(URL)
+    sqlite = URL.startswith("sqlite")
     with engine.connect() as conn:
-        context.configure(connection=conn, target_metadata=target_metadata, render_as_batch=URL.startswith("sqlite"))
+        if sqlite:
+            # SQLite alters a table by rebuilding it. With foreign keys enforced, dropping the old table would cascade-delete
+            # every child row (an onboarding's steps, a client's contacts). Switch enforcement off for the migration, as
+            # Alembic's batch-mode guide advises. It can't be changed inside a transaction, so this comes first.
+            conn.exec_driver_sql("PRAGMA foreign_keys=OFF")
+            conn.commit()  # end the transaction that call started, so the migration gets (and commits) its own
+        context.configure(connection=conn, target_metadata=target_metadata, render_as_batch=sqlite)
         with context.begin_transaction():
             context.run_migrations()
+        if sqlite:
+            conn.exec_driver_sql("PRAGMA foreign_keys=ON")
+            conn.commit()
 
 
 if context.is_offline_mode():

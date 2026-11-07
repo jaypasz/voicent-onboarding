@@ -20,6 +20,7 @@ def test_fully_set_features_are_enabled_without_warnings():
         resend_api_key="re_x", resend_from="Voicent <hi@example.com>",
         aios_api_url="https://aios.example.com", aios_service_token="x" * 24,
         supabase_url="https://p.supabase.co", supabase_service_key="k", portal_signing_key="k" * 32,
+        app_url="https://onboard.example.com",
     )
     assert s.optional_warnings() == []
     assert s.sms_enabled and s.email_enabled and s.aios_sync_enabled and s.uploads_enabled

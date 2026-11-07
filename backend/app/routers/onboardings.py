@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from dataclasses import asdict
+
+from fastapi import APIRouter, BackgroundTasks, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from .. import magic_link, models as m, services
+from .. import aios_sync, magic_link, models as m, services
+from .. import nudges as reminders
 from ..deps import Actor, Auth, Db, Org, Session
 from ..errors import NotFound
 from ..schemas import CommentIn, NudgesIn, OnboardingIn, StepAnswerIn, comment_out, onboarding_detail, onboarding_summary, step_out
@@ -52,9 +55,10 @@ def _link_out(link: m.MagicLink, contact_name: str = "") -> dict:
 
 
 @router.post("/{onboarding_id}/send")
-def send(onboarding_id: str, request: Request, db: Session = Db, org: str = Org):
+def send(onboarding_id: str, request: Request, background: BackgroundTasks, db: Session = Db, org: str = Org):
     """Start the onboarding and issue one link per contact. The links are in this response only; they can't be shown again."""
     ob = services.send_onboarding(db, org, onboarding_id)
+    aios_sync.kick(request, background, org, ob.id)
     contacts = list(db.scalars(select(m.Contact).where(m.Contact.client_id == ob.client_id, m.Contact.org_id == org).order_by(m.Contact.created_at)))
     links = []
     for c in contacts:
@@ -100,46 +104,53 @@ def file_url(onboarding_id: str, file_id: str, request: Request, db: Session = D
 
 
 @router.post("/{onboarding_id}/pause")
-def pause(onboarding_id: str, db: Session = Db, org: str = Org):
+def pause(onboarding_id: str, request: Request, background: BackgroundTasks, db: Session = Db, org: str = Org):
+    aios_sync.kick(request, background, org, onboarding_id)
     return onboarding_detail(services.set_onboarding_status(db, org, onboarding_id, "paused"))
 
 
 @router.post("/{onboarding_id}/resume")
-def resume(onboarding_id: str, db: Session = Db, org: str = Org):
+def resume(onboarding_id: str, request: Request, background: BackgroundTasks, db: Session = Db, org: str = Org):
+    aios_sync.kick(request, background, org, onboarding_id)
     return onboarding_detail(services.set_onboarding_status(db, org, onboarding_id, "active"))
 
 
 @router.post("/{onboarding_id}/archive")
-def archive(onboarding_id: str, db: Session = Db, org: str = Org):
+def archive(onboarding_id: str, request: Request, background: BackgroundTasks, db: Session = Db, org: str = Org):
+    aios_sync.kick(request, background, org, onboarding_id)
     return onboarding_detail(services.set_onboarding_status(db, org, onboarding_id, "archived"))
 
 
 @router.put("/{onboarding_id}/nudges")
-def nudges(onboarding_id: str, body: NudgesIn, db: Session = Db, org: str = Org):
+def pause_reminders(onboarding_id: str, body: NudgesIn, db: Session = Db, org: str = Org):
     return onboarding_summary(services.set_nudges_paused(db, org, onboarding_id, body.paused))
 
 
 @router.put("/{onboarding_id}/steps/{key}")
-def submit(onboarding_id: str, key: str, body: StepAnswerIn, db: Session = Db, org: str = Org, actor: Actor = Auth):
+def submit(onboarding_id: str, key: str, body: StepAnswerIn, request: Request, background: BackgroundTasks, db: Session = Db, org: str = Org, actor: Actor = Auth):
+    aios_sync.kick(request, background, org, onboarding_id)
     """Jay records an answer for a step (on a call, or an internal task)."""
     services.submit_step(db, org, onboarding_id, key, body.data, submitted_by=f"admin:{actor.label}", actor_kind="admin")
     return _step(db, org, onboarding_id, key)
 
 
 @router.post("/{onboarding_id}/steps/{key}/complete")
-def complete(onboarding_id: str, key: str, db: Session = Db, org: str = Org):
+def complete(onboarding_id: str, key: str, request: Request, background: BackgroundTasks, db: Session = Db, org: str = Org):
+    aios_sync.kick(request, background, org, onboarding_id)
     services.complete_step(db, org, onboarding_id, key)
     return _step(db, org, onboarding_id, key)
 
 
 @router.post("/{onboarding_id}/steps/{key}/skip")
-def skip(onboarding_id: str, key: str, db: Session = Db, org: str = Org):
+def skip(onboarding_id: str, key: str, request: Request, background: BackgroundTasks, db: Session = Db, org: str = Org):
+    aios_sync.kick(request, background, org, onboarding_id)
     services.skip_step(db, org, onboarding_id, key)
     return _step(db, org, onboarding_id, key)
 
 
 @router.post("/{onboarding_id}/steps/{key}/reopen")
-def reopen(onboarding_id: str, key: str, db: Session = Db, org: str = Org):
+def reopen(onboarding_id: str, key: str, request: Request, background: BackgroundTasks, db: Session = Db, org: str = Org):
+    aios_sync.kick(request, background, org, onboarding_id)
     services.reopen_step(db, org, onboarding_id, key)
     return _step(db, org, onboarding_id, key)
 
@@ -147,3 +158,39 @@ def reopen(onboarding_id: str, key: str, db: Session = Db, org: str = Org):
 @router.post("/{onboarding_id}/steps/{key}/comments", status_code=201)
 def comment(onboarding_id: str, key: str, body: CommentIn, db: Session = Db, org: str = Org, actor: Actor = Auth):
     return comment_out(services.add_comment(db, org, onboarding_id, key, body=body.body, author_kind="admin", author_label=actor.label, client_visible=body.client_visible))
+
+
+# ---------------------------------------------------------------- reminders and AIOS
+
+@router.post("/{onboarding_id}/nudge")
+def remind_now(onboarding_id: str, request: Request, db: Session = Db, org: str = Org):
+    """Send a reminder to this onboarding's contacts now. Ignores the stall timer and the pause switch, never the texting rules."""
+    st = request.app.state
+    ob = services.get_onboarding(db, org, onboarding_id)
+    results = [asdict(o) for o in reminders.remind_now(db, st.settings, st.notifier, ob, st.clock())]
+    return {"results": results, "message": "" if results else "Nobody has any steps left to do."}
+
+
+@router.get("/{onboarding_id}/nudges")
+def reminder_history(onboarding_id: str, db: Session = Db, org: str = Org):
+    services.get_onboarding(db, org, onboarding_id)
+    names = {c.id: c.name for c in db.scalars(select(m.Contact).where(m.Contact.org_id == org))}
+    rows = db.scalars(select(m.Nudge).where(m.Nudge.onboarding_id == onboarding_id, m.Nudge.org_id == org).order_by(m.Nudge.created_at.desc()).limit(50))
+    return [{"id": n.id, "contact": names.get(n.contact_id, ""), "channel": n.channel, "status": n.status, "round": n.round, "kind": n.template,
+             "at": n.sent_at or n.created_at, "error": n.error} for n in rows]
+
+
+@router.get("/{onboarding_id}/sync")
+def sync_status(onboarding_id: str, request: Request, db: Session = Db, org: str = Org):
+    return aios_sync.status_for(db, request.app.state.settings, services.get_onboarding(db, org, onboarding_id))
+
+
+@router.post("/{onboarding_id}/sync")
+def sync_now(onboarding_id: str, request: Request, db: Session = Db, org: str = Org):
+    """Sync this onboarding to AIOS right now and say how it went."""
+    st = request.app.state
+    services.get_onboarding(db, org, onboarding_id)
+    db.commit()  # the sync reads in its own session, so what we've just seen must be saved first
+    r = aios_sync.sync_onboarding(st.sessionmaker, st.settings, org, onboarding_id, st.aios)
+    db.expire_all()
+    return {"result": asdict(r)} | aios_sync.status_for(db, st.settings, services.get_onboarding(db, org, onboarding_id))

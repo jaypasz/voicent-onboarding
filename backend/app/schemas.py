@@ -3,17 +3,26 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from . import models as m
+from .config import valid_timezone
 
 ClientKind = Literal["trades", "agency", "msp", "other"]
+
+
+def _tz(v: str | None) -> str | None:
+    if v is not None and not valid_timezone(v):
+        raise ValueError("That isn't a time zone name. Use one like America/New_York.")
+    return v
 
 
 class ClientIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     kind: ClientKind = "other"
     notes: str = Field(default="", max_length=5000)
+    timezone: str | None = Field(default=None, max_length=64)
+    _tz = field_validator("timezone")(_tz)
 
 
 class ClientPatch(BaseModel):
@@ -21,6 +30,8 @@ class ClientPatch(BaseModel):
     kind: ClientKind | None = None
     status: Literal["active", "archived"] | None = None
     notes: str | None = Field(default=None, max_length=5000)
+    timezone: str | None = Field(default=None, max_length=64)
+    _tz = field_validator("timezone")(_tz)
 
 
 class ContactIn(BaseModel):
@@ -60,6 +71,7 @@ class ClientOut(BaseModel):
     kind: str
     status: str
     notes: str
+    timezone: str
     created_at: dt.datetime
     contacts: list[ContactOut] = []
 
@@ -130,7 +142,7 @@ def onboarding_summary(ob: m.Onboarding) -> dict:
     return {
         "id": ob.id, "client_id": ob.client_id, "title": ob.title, "layout": ob.layout, "status": ob.status,
         "started_at": ob.started_at, "completed_at": ob.completed_at, "last_activity_at": ob.last_activity_at,
-        "nudges_paused": ob.nudges_paused,
+        "nudges_paused": ob.nudges_paused, "attention": ob.attention,
         "progress": {"done": sum(1 for s in live if s.status == "done"), "total": len(live)},
     }
 

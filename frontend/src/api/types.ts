@@ -82,6 +82,7 @@ export interface Client {
   kind: 'trades' | 'agency' | 'msp' | 'other'
   status: 'active' | 'archived'
   notes: string
+  timezone: string
   created_at: string
   contacts: Contact[]
 }
@@ -107,6 +108,8 @@ export interface TemplateDetail extends TemplateSummary {
   new_version?: boolean
 }
 
+export type Attention = 'nudges_exhausted' | 'unreachable' | null
+
 export interface OnboardingSummary {
   id: string
   client_id: string
@@ -117,6 +120,7 @@ export interface OnboardingSummary {
   completed_at: string | null
   last_activity_at: string
   nudges_paused: boolean
+  attention: Attention
   progress: Progress
 }
 
@@ -164,4 +168,39 @@ export interface YamlImportResult {
   id?: string
   new_version?: boolean
   document?: unknown
+}
+
+export interface Features {
+  sms: boolean
+  email: boolean
+  reminders: boolean
+  aios_sync: boolean
+  uploads: boolean
+  jobs: boolean
+}
+
+export interface NudgeResult {
+  contact: string
+  status: 'sent' | 'failed' | 'skipped' | 'later' | 'would_send'
+  channel: 'sms' | 'email' | null
+  reason: string
+}
+
+export interface NudgeRow {
+  id: string
+  contact: string
+  channel: 'sms' | 'email'
+  status: 'queued' | 'sent' | 'failed'
+  round: number
+  kind: 'stalled' | 'manual'
+  at: string
+  error: string
+}
+
+export interface SyncState {
+  enabled: boolean
+  state: 'off' | 'not_sent' | 'synced' | 'failing' | 'pending'
+  project_id: string | null
+  log: { at: string; status: string; detail: string }[]
+  result?: { ok: boolean; state: string; message: string; changes: number }
 }

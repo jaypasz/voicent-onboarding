@@ -11,7 +11,11 @@ from .auth import Actor, current_actor
 
 
 def get_db(request: Request) -> Iterator[Session]:
-    """One session per request. Commits when the handler finishes, rolls back if it raises."""
+    """One session per request. Commits when the handler finishes, rolls back if it raises.
+
+    Every use is Depends(get_db, scope="function"): the commit happens as soon as the handler returns, BEFORE the response is
+    sent and before any background task starts. With the default scope a background task (the AIOS sync) runs while the
+    request's changes are still uncommitted and reads stale data. tests/test_aios_sync.py pins this on a real database."""
     db: Session = request.app.state.sessionmaker()
     try:
         yield db
@@ -23,7 +27,7 @@ def get_db(request: Request) -> Iterator[Session]:
         db.close()
 
 
-def current_org(request: Request, actor: Actor = Depends(current_actor), db: Session = Depends(get_db)) -> str:
+def current_org(request: Request, actor: Actor = Depends(current_actor), db: Session = Depends(get_db, scope="function")) -> str:
     """The org this admin request acts for. A person acts for the org they belong to; nobody reaches another org's rows.
 
     - user: the org in org_members. No membership means 403.
@@ -55,7 +59,7 @@ def current_org(request: Request, actor: Actor = Depends(current_actor), db: Ses
     return ids[0]
 
 
-Db = Depends(get_db)
+Db = Depends(get_db, scope="function")
 Auth = Depends(current_actor)
 Org = Depends(current_org)
 
@@ -64,7 +68,7 @@ __all__ = ["Actor", "Auth", "Db", "Org", "Session"]
 
 # ---------------------------------------------------------------- the client side
 
-def portal_ctx(request: Request, db: Session = Depends(get_db)):
+def portal_ctx(request: Request, db: Session = Depends(get_db, scope="function")):
     """The client behind a portal session token. Every failure is the same 401, so nothing is learned from it."""
     from . import portal
 

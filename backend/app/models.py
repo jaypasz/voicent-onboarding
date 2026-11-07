@@ -61,6 +61,8 @@ class Client(Stamped, Base):
     kind: Mapped[str] = mapped_column(String(20), default="other")  # trades | agency | msp | other
     status: Mapped[str] = mapped_column(String(20), default="active", index=True)  # active | archived
     notes: Mapped[str] = mapped_column(Text, default="")
+    # Reminders respect the client's local time (an IANA name such as America/New_York).
+    timezone: Mapped[str] = mapped_column(String(64), default="America/New_York", server_default="America/New_York")
 
     contacts: Mapped[list["Contact"]] = relationship(back_populates="client", cascade="all, delete-orphan")
     onboardings: Mapped[list["Onboarding"]] = relationship(back_populates="client")
@@ -128,7 +130,14 @@ class Onboarding(Stamped, Base):
     completed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_activity_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
     nudges_paused: Mapped[bool] = mapped_column(Boolean, default=False)
-    aios_project_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    aios_project_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    aios_status: Mapped[str | None] = mapped_column(String(20), nullable=True)  # the project status last sent to AIOS
+    # Why Jay should look at this one: nudges_exhausted (the client went quiet after every reminder) or unreachable.
+    attention: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # sync_version goes up on every change AIOS should hear about; synced_version is what the last sync covered.
+    # A change is never lost, even if it lands while a sync is running: the two just differ until the next pass.
+    sync_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    synced_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     client: Mapped[Client] = relationship(back_populates="onboardings")
     steps: Mapped[list["Step"]] = relationship(back_populates="onboarding", cascade="all, delete-orphan", order_by="Step.position")
@@ -154,6 +163,8 @@ class Step(Stamped, Base):
     due_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     aios_task_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    aios_status: Mapped[str | None] = mapped_column(String(20), nullable=True)  # the task status last sent to AIOS
+    aios_comment_revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # last response revision noted in AIOS
 
     onboarding: Mapped[Onboarding] = relationship(back_populates="steps")
     responses: Mapped[list["Response"]] = relationship(back_populates="step", cascade="all, delete-orphan", order_by="Response.revision")
@@ -221,14 +232,19 @@ class MagicLink(Stamped, Base):
 
 
 class Nudge(Stamped, Base):
+    """One attempt to remind one contact on one channel. (onboarding, contact, channel, round) is unique, so two
+    overlapping runs can't send the same reminder twice: the second insert fails and that contact is skipped."""
+
     __tablename__ = "nudges"
+    __table_args__ = (UniqueConstraint("onboarding_id", "contact_id", "channel", "round", name="uq_nudges_attempt"),)
 
     org_id: Mapped[str] = org_fk()
     onboarding_id: Mapped[str] = mapped_column(ForeignKey("onboardings.id", ondelete="CASCADE"), index=True)
     contact_id: Mapped[str | None] = mapped_column(ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True)
     channel: Mapped[str] = mapped_column(String(10))  # sms | email
-    template: Mapped[str] = mapped_column(String(40), default="stalled")
-    status: Mapped[str] = mapped_column(String(20), default="queued")  # queued | sent | failed | skipped
+    template: Mapped[str] = mapped_column(String(40), default="stalled")  # stalled (automatic) | manual
+    round: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    status: Mapped[str] = mapped_column(String(20), default="queued")  # queued | sent | failed
     sent_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error: Mapped[str] = mapped_column(String(300), default="")  # our own wording plus a status code, never provider text
 

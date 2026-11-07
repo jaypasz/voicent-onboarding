@@ -101,17 +101,23 @@ describe('TemplatesPage', () => {
   })
 })
 
+const panels = {
+  'GET /features': { body: { sms: true, email: true, reminders: true, aios_sync: true, uploads: false, jobs: true } },
+  'GET /onboardings/o1/nudges': { body: [] },
+  'GET /onboardings/o1/sync': { body: { enabled: true, state: 'synced', project_id: 'onb-o1', log: [] } },
+}
+
 describe('OnboardingDetail', () => {
   const client: Client = {
-    id: 'cl1', name: 'Acme Plumbing', kind: 'trades', status: 'active', notes: '', created_at: '2026-11-01T00:00:00Z',
+    id: 'cl1', name: 'Acme Plumbing', kind: 'trades', status: 'active', notes: '', timezone: 'America/New_York', created_at: '2026-11-01T00:00:00Z',
     contacts: [{ id: 'c1', client_id: 'cl1', name: 'Pat Owner', email: '', phone: '', role: 'owner', sms_consent: false, sms_consent_source: '' }],
   }
   const draft: OnboardingDetail = {
     id: 'o1', client_id: 'cl1', title: 'Kickoff: Acme', layout: 'focus', status: 'draft', started_at: null, completed_at: null,
-    last_activity_at: '2026-11-07T00:00:00Z', nudges_paused: false, progress: { done: 0, total: 2 },
+    last_activity_at: '2026-11-07T00:00:00Z', nudges_paused: false, attention: null, progress: { done: 0, total: 2 },
     steps: [astep({ id: 's1', key: 'basics', title: 'Basics' }), astep({ id: 's2', key: 'build', title: 'Build the agent', type: 'internal_task', visibility: 'internal' })],
   }
-  const base = { 'GET /clients': { body: [client] }, 'GET /onboardings/o1/links': { body: [] } }
+  const base = { 'GET /clients': { body: [client] }, 'GET /onboardings/o1/links': { body: [] }, ...panels }
   const at = (ui = <OnboardingDetailPage />) => renderRoute(ui, '/onboardings/:id', '/onboardings/o1')
 
   test('a draft says the client can see nothing yet, and internal steps are marked as never shown', async () => {
@@ -124,7 +130,7 @@ describe('OnboardingDetail', () => {
   })
 
   test('with nobody to send to, sending is off and it says why', async () => {
-    mockFetch({ 'GET /clients': { body: [{ ...client, contacts: [] }] }, 'GET /onboardings/o1': { body: draft }, 'GET /onboardings/o1/links': { body: [] } })
+    mockFetch({ 'GET /clients': { body: [{ ...client, contacts: [] }] }, 'GET /onboardings/o1': { body: draft }, 'GET /onboardings/o1/links': { body: [] }, ...panels })
     at()
     expect(await screen.findByText(/no contacts yet/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Send to the client' })).toBeDisabled()
@@ -148,7 +154,7 @@ describe('OnboardingDetail', () => {
       { id: 'l2', contact_id: 'c1', contact_name: 'Pat Owner', expires_at: '2026-10-01T00:00:00Z', revoked_at: null, last_used_at: null, usable: false },
       { id: 'l3', contact_id: 'c1', contact_name: 'Pat Owner', expires_at: '2026-12-07T00:00:00Z', revoked_at: '2026-11-02T00:00:00Z', last_used_at: null, usable: false },
     ]
-    mockFetch({ 'GET /clients': { body: [client] }, 'GET /onboardings/o1': { body: { ...draft, status: 'active' } }, 'GET /onboardings/o1/links': { body: links } })
+    mockFetch({ 'GET /clients': { body: [client] }, 'GET /onboardings/o1': { body: { ...draft, status: 'active' } }, 'GET /onboardings/o1/links': { body: links }, ...panels })
     at()
     const panel = await screen.findByRole('region', { name: 'Client links' })
     expect(await within(panel).findByText(/Works/)).toBeInTheDocument()
@@ -162,7 +168,7 @@ describe('OnboardingDetail', () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
     const link = { id: 'l1', contact_id: 'c1', contact_name: 'Pat Owner', expires_at: '2026-12-07T00:00:00Z', revoked_at: null, last_used_at: null, usable: true }
     const { calls } = mockFetch({
-      'GET /clients': { body: [client] }, 'GET /onboardings/o1': { body: { ...draft, status: 'active' } }, 'GET /onboardings/o1/links': { body: [link] },
+      'GET /clients': { body: [client] }, 'GET /onboardings/o1': { body: { ...draft, status: 'active' } }, 'GET /onboardings/o1/links': { body: [link] }, ...panels,
       'POST /onboardings/o1/links/l1/revoke': { body: { ...link, revoked_at: '2026-11-07T00:00:00Z', usable: false } },
     })
     at()

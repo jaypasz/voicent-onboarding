@@ -57,6 +57,8 @@ export default function ClientDetail() {
     }
   }
 
+  const zones = ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Phoenix', 'America/Los_Angeles', 'America/Anchorage', 'Pacific/Honolulu', 'Europe/London', 'Europe/Paris', 'Asia/Tokyo', 'Australia/Sydney']
+  if (!zones.includes(client.timezone)) zones.push(client.timezone)
   const mine = onboardings.data?.filter((o) => o.client_id === id) ?? []
   return (
     <div className="stack">
@@ -68,6 +70,13 @@ export default function ClientDetail() {
         </button>
       </div>
       <p className="help">{client.kind}{client.status === 'archived' ? ' · archived' : ''}</p>
+      <label className="field-group narrow-form">
+        <span>Their time zone</span>
+        <select value={client.timezone} onChange={(e) => update.mutate({ timezone: e.target.value })}>
+          {zones.map((z) => <option key={z} value={z}>{z.replace(/_/g, ' ')}</option>)}
+        </select>
+        <span className="help">Reminders are never sent at night here (9pm to 8am their time).</span>
+      </label>
 
       <h2>Contacts</h2>
       <p className="help">The role matches steps in a template. A step for "owner" goes to the contact whose role is "owner".</p>

@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { request } from './http'
 import type {
-  Client, Contact, LinkInfo, OnboardingDetail, OnboardingStatus, OnboardingSummary, SentOnboarding, TemplateDetail, TemplateSummary, YamlImportResult,
+  Client, Contact, Features, LinkInfo, NudgeResult, NudgeRow, OnboardingDetail, OnboardingStatus, OnboardingSummary, SentOnboarding, SyncState, TemplateDetail,
+  TemplateSummary, YamlImportResult,
 } from './types'
 
 const k = {
@@ -20,6 +21,9 @@ export const useTemplate = (id: string) => useQuery({ queryKey: ['template', id]
 export const useOnboardings = (status?: OnboardingStatus | '') =>
   useQuery({ queryKey: [...k.onboardings, status ?? ''], queryFn: () => request<OnboardingSummary[]>(`/onboardings${status ? `?status=${status}` : ''}`) })
 export const useOnboarding = (id: string) => useQuery({ queryKey: k.onboarding(id), queryFn: () => request<OnboardingDetail>(`/onboardings/${id}`) })
+export const useFeatures = () => useQuery({ queryKey: ['features'], queryFn: () => request<Features>('/features'), staleTime: 60_000 })
+export const useNudgeHistory = (id: string) => useQuery({ queryKey: ['nudges', id], queryFn: () => request<NudgeRow[]>(`/onboardings/${id}/nudges`) })
+export const useSyncStatus = (id: string) => useQuery({ queryKey: ['sync', id], queryFn: () => request<SyncState>(`/onboardings/${id}/sync`) })
 export const useLinks = (id: string) => useQuery({ queryKey: k.links(id), queryFn: () => request<LinkInfo[]>(`/onboardings/${id}/links`) })
 
 // ------------------------------------------------------------------ writes
@@ -37,7 +41,7 @@ function useWrite<A, R>(fn: (a: A) => Promise<R>, invalidate: (a: A, r: R) => (r
 export const useCreateClient = () =>
   useWrite((b: { name: string; kind: Client['kind']; notes?: string }) => request<Client>('/clients', { body: b }), () => [k.clients])
 export const useUpdateClient = (id: string) =>
-  useWrite((b: Partial<Pick<Client, 'name' | 'kind' | 'status' | 'notes'>>) => request<Client>(`/clients/${id}`, { method: 'PATCH', body: b }), () => [k.clients])
+  useWrite((b: Partial<Pick<Client, 'name' | 'kind' | 'status' | 'notes' | 'timezone'>>) => request<Client>(`/clients/${id}`, { method: 'PATCH', body: b }), () => [k.clients])
 export const useAddContact = (clientId: string) =>
   useWrite((b: Partial<Contact> & { name: string }) => request<Contact>(`/clients/${clientId}/contacts`, { body: b }), () => [k.clients])
 export const useUpdateContact = (clientId: string) =>
@@ -70,3 +74,9 @@ export const useRevokeLink = (id: string) => useWrite((linkId: string) => reques
 export const useExtendLink = (id: string) =>
   useWrite((a: { linkId: string; days: number }) => request<LinkInfo>(`/onboardings/${id}/links/${a.linkId}/extend`, { body: { days: a.days } }), () => [k.links(id)])
 export const fetchFileUrl = (onboardingId: string, fileId: string) => request<{ name: string; url: string }>(`/onboardings/${onboardingId}/files/${fileId}/url`)
+
+export const useRemindNow = (id: string) =>
+  useWrite(() => request<{ results: NudgeResult[]; message: string }>(`/onboardings/${id}/nudge`, { body: {} }), () => [['nudges', id], k.onboarding(id)])
+export const usePauseReminders = (id: string) =>
+  useWrite((paused: boolean) => request<OnboardingSummary>(`/onboardings/${id}/nudges`, { method: 'PUT', body: { paused } }), () => [k.onboarding(id), k.onboardings])
+export const useSyncNow = (id: string) => useWrite(() => request<SyncState>(`/onboardings/${id}/sync`, { body: {} }), () => [['sync', id]])

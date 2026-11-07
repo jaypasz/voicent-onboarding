@@ -15,6 +15,16 @@ SERVICE_KEY_NAMES = ("SUPABASE_SERVICE_KEY", "SUPABASE_SERVICE_ROLE_KEY", "SUPAB
 _PROCESS_KEY = ""
 
 
+def valid_timezone(name: str) -> bool:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    try:
+        ZoneInfo(name)
+        return bool(name)
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        return False
+
+
 def _make_process_key(value: str) -> str:
     global _PROCESS_KEY
     _PROCESS_KEY = value
@@ -60,6 +70,18 @@ class Settings:
     # One-way sync into the AIOS app (projects and tasks).
     aios_api_url: str = ""
     aios_service_token: str = ""
+    # Background jobs (reminders and AIOS sync) run inside the web process every few minutes. Off unless from_env turns
+    # them on, so tests and scripts never start a thread by accident. Run one instance of the service.
+    jobs_enabled: bool = False
+    jobs_interval_minutes: int = 15
+    # Reminders: at most nudge_max automatic rounds, never texting between quiet_start and quiet_end (the client's local hours),
+    # and retry a failed send no sooner than retry_hours.
+    nudge_max: int = 3
+    nudge_quiet_start: int = 21
+    nudge_quiet_end: int = 8
+    nudge_retry_hours: int = 6
+    default_timezone: str = "America/New_York"
+    brand_name: str = "Voicent"
 
     def optional_warnings(self) -> list[str]:
         """Problems with optional settings. They switch a feature off; they never stop the app starting."""
@@ -79,6 +101,10 @@ class Settings:
             out.append("Client sessions: set PORTAL_SIGNING_KEY so portal sessions survive a restart. Using a random key for now.")
         if self.portal_signing_key and len(self.portal_signing_key) < 24:
             out.append("Client sessions: PORTAL_SIGNING_KEY is shorter than 24 characters. Using a random key until it is longer.")
+        if (self.sms_enabled or self.email_enabled) and not self.app_url:
+            out.append("Reminders: set APP_URL (the public address of this service) so reminders can carry a link. Reminders are off until then.")
+        if not valid_timezone(self.default_timezone):
+            out.append(f"DEFAULT_TIMEZONE '{self.default_timezone}' isn't a time zone name. Using America/New_York.")
         if self.aios_api_url and not self.aios_api_url.startswith("https://"):
             out.append("AIOS sync: AIOS_API_URL must be an https:// URL. Sync is off until it is.")
         return out
@@ -93,6 +119,11 @@ class Settings:
         if self.supabase_jwt_secret:
             return hashlib.sha256(("portal-session|" + self.supabase_jwt_secret).encode()).hexdigest()
         return _PROCESS_KEY or _make_process_key(secrets.token_hex(32))
+
+    @property
+    def reminders_enabled(self) -> bool:
+        """Reminders need a way to send and an address to put in the message."""
+        return (self.sms_enabled or self.email_enabled) and self.app_url.startswith(("https://", "http://"))
 
     @property
     def uploads_enabled(self) -> bool:
@@ -139,6 +170,14 @@ class Settings:
             resend_from=e("RESEND_FROM", "").strip(),
             aios_api_url=e("AIOS_API_URL", "").rstrip("/"),
             aios_service_token=e("AIOS_SERVICE_TOKEN", "").strip(),
+            jobs_enabled=e("JOBS_ENABLED", "1") != "0",
+            jobs_interval_minutes=int(e("JOBS_INTERVAL_MINUTES", "15")),
+            nudge_max=int(e("NUDGE_MAX", "3")),
+            nudge_quiet_start=int(e("NUDGE_QUIET_START", "21")),
+            nudge_quiet_end=int(e("NUDGE_QUIET_END", "8")),
+            nudge_retry_hours=int(e("NUDGE_RETRY_HOURS", "6")),
+            default_timezone=e("DEFAULT_TIMEZONE", "America/New_York").strip(),
+            brand_name=e("BRAND_NAME", "Voicent").strip() or "Voicent",
         )
 
     def validate(self) -> None:
@@ -156,6 +195,10 @@ class Settings:
                 raise RuntimeError("Each service token must be at least 24 characters.")
         if self.link_ttl_days < 1:
             raise RuntimeError("LINK_TTL_DAYS must be at least 1.")
+        if self.jobs_interval_minutes < 1 or self.nudge_max < 1 or self.nudge_retry_hours < 1:
+            raise RuntimeError("JOBS_INTERVAL_MINUTES, NUDGE_MAX and NUDGE_RETRY_HOURS must be at least 1.")
+        if not (0 <= self.nudge_quiet_start <= 23 and 0 <= self.nudge_quiet_end <= 23):
+            raise RuntimeError("NUDGE_QUIET_START and NUDGE_QUIET_END must be hours from 0 to 23.")
         if self.session_ttl_minutes < 1:
             raise RuntimeError("SESSION_TTL_MINUTES must be at least 1.")
         if min(self.rate_exchange_per_ip, self.rate_exchange_global, self.rate_writes_per_link) < 1:

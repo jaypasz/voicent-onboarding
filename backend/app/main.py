@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import datetime as dt
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -9,6 +11,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import sessionmaker
 
 from . import models  # noqa: F401  (registers the tables on Base.metadata)
+from .aios import AiosClient
+from .jobs import Scheduler
+from .notify import Notifier
 from .config import Settings
 from .db import Base, make_engine
 from .errors import ServiceError
@@ -30,14 +35,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Interactive API docs are for local work only: they are unauthenticated.
     local = settings.app_env == "local"
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        scheduler = Scheduler(app.state.sessionmaker, settings) if settings.jobs_enabled else None
+        if scheduler:
+            scheduler.start()
+        try:
+            yield
+        finally:
+            if scheduler:
+                scheduler.stop()
+
     app = FastAPI(
-        title="Voicent Onboarding", version="0.1.0",
+        title="Voicent Onboarding", version="0.1.0", lifespan=lifespan,
         docs_url="/api/swagger" if local else None, redoc_url=None, openapi_url="/api/openapi.json" if local else None,
     )
     app.state.settings = settings
     app.state.engine = engine
     app.state.sessionmaker = sessionmaker(engine, expire_on_commit=False)
     app.state.storage = Storage(settings) if settings.uploads_enabled else None
+    app.state.notifier = Notifier(settings)
+    app.state.clock = lambda: dt.datetime.now(dt.timezone.utc)  # a seam so tests can say what time it is
+    app.state.aios = AiosClient(settings) if settings.aios_sync_enabled else None
     app.state.limit_exchange_ip = RateLimiter(settings.rate_exchange_per_ip)
     app.state.limit_exchange_all = RateLimiter(settings.rate_exchange_global)
     app.state.limit_writes = RateLimiter(settings.rate_writes_per_link)
