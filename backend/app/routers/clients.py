@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from .. import services
 from ..deps import Db, Org, Session
@@ -15,8 +15,9 @@ def list_clients(status: str | None = None, db: Session = Db, org: str = Org):
 
 
 @router.post("", response_model=ClientOut, status_code=201)
-def create_client(body: ClientIn, db: Session = Db, org: str = Org):
-    return services.create_client(db, org, name=body.name, kind=body.kind, notes=body.notes)
+def create_client(body: ClientIn, request: Request, db: Session = Db, org: str = Org):
+    tz = body.timezone or request.app.state.settings.default_timezone
+    return services.create_client(db, org, name=body.name, kind=body.kind, notes=body.notes, timezone=tz)
 
 
 @router.get("/{client_id}", response_model=ClientOut)

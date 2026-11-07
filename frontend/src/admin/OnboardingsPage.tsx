@@ -35,6 +35,9 @@ export default function OnboardingsPage() {
                 <strong>{o.title}</strong>
                 <OnboardingBadge status={o.status} />
               </div>
+              {o.attention && (
+                <div><span className="badge badge-in_progress"><span aria-hidden="true">⚠</span> Needs you: {o.attention === 'unreachable' ? 'no way to reach them' : 'no reply to the reminders'}</span></div>
+              )}
               <div className="help">
                 {name(o.client_id)} · {o.progress.done} of {o.progress.total} steps done · active {timeAgo(o.last_activity_at)}
               </div>

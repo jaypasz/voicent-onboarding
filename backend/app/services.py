@@ -65,8 +65,8 @@ def list_clients(db: Session, org_id: str, status: str | None = None) -> list[m.
     return list(db.scalars(q))
 
 
-def create_client(db: Session, org_id: str, *, name: str, kind: str = "other", notes: str = "") -> m.Client:
-    c = m.Client(org_id=org_id, name=redact(name.strip()), kind=kind, notes=redact(notes))
+def create_client(db: Session, org_id: str, *, name: str, kind: str = "other", notes: str = "", timezone: str = "America/New_York") -> m.Client:
+    c = m.Client(org_id=org_id, name=redact(name.strip()), kind=kind, notes=redact(notes), timezone=timezone)
     db.add(c)
     db.flush()
     return c
@@ -254,6 +254,7 @@ def send_onboarding(db: Session, org_id: str, onboarding_id: str) -> m.Onboardin
         days = offsets.get(step.key)
         step.due_at = start + dt.timedelta(days=days) if days is not None else None
     ob.status, ob.started_at, ob.last_activity_at = "active", start, start
+    ob.sync_version += 1
     db.flush()
     return ob
 
@@ -268,6 +269,7 @@ def set_onboarding_status(db: Session, org_id: str, onboarding_id: str, status: 
         raise Conflict(f"Can't go from {ob.status} to {status}.")
     ob.status = status
     ob.last_activity_at = now()
+    ob.sync_version += 1
     db.flush()
     return ob
 
@@ -313,6 +315,8 @@ def submit_step(db: Session, org_id: str, onboarding_id: str, key: str, data, *,
     step.responses.append(m.Response(
         org_id=org_id, revision=len(step.responses) + 1, data=cleaned, submitted_by=submitted_by, submitted_at=now()))
     _set_step_status(ob, step, stype.resulting_status(_step_config(ob, key), cleaned))
+    if actor_kind == "client":
+        ob.attention = None  # they're back, so whatever was worrying us isn't true any more
     _after_change(db, ob)
     return step
 
@@ -374,6 +378,7 @@ def _set_step_status(ob: m.Onboarding, step: m.Step, status: str) -> None:
 
 def _after_change(db: Session, ob: m.Onboarding) -> None:
     ob.last_activity_at = now()
+    ob.sync_version += 1  # AIOS needs to hear about this
     if ob.status == "active" and ob.steps and all(s.status in ("done", "skipped") for s in ob.steps):
         ob.status, ob.completed_at = "completed", now()
     db.flush()

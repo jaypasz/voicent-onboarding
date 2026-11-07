@@ -14,6 +14,6 @@ uvicorn app.main:create_app --factory --reload
 cd frontend && npm install && npm run dev
 ```
 
-Status: phases 1 to 3 (scaffold, data model, auth; template engine, step types, admin API; client portal API; client portal and admin UIs). Nudges, AIOS sync and the template GUI builder follow.
+Status: phases 1 to 4 (scaffold, data model, auth; template engine, step types, admin API; client portal and admin UIs; reminders for quiet clients; one-way sync into the AIOS board). The Voicent-App provisioning hook and the template GUI builder follow.
 
 Local try-out with no login: start the backend with `APP_ENV=local AUTH_DISABLED=1`, run `python -m app.cli seed --org-name Local --org-slug local`, then `npm run dev` in `frontend/`.
