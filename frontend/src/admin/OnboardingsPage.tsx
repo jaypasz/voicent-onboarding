@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import { useClients, useOnboardings } from '../api/admin'
 import type { OnboardingStatus } from '../api/types'
 import { Banner } from '../components/Banner'
+import { LoadError } from '../components/LoadError'
 import { OnboardingBadge } from '../components/StatusBadge'
 import { ONBOARDING_STATUS, timeAgo } from '../lib/format'
 
@@ -24,8 +25,8 @@ export default function OnboardingsPage() {
           </button>
         ))}
       </div>
-      {list.isError && <Banner kind="error">Couldn't load onboardings.</Banner>}
-      {list.data?.length === 0 && <Banner>Nothing here yet. <Link to="/new">Start an onboarding</Link>.</Banner>}
+      {list.isError && <LoadError error={list.error} what="onboardings" />}
+      {list.isSuccess && list.data.length === 0 && <Banner>Nothing here yet. <Link to="/new">Start an onboarding</Link>.</Banner>}
       <ul className="cards">
         {list.data?.map((o) => (
           <li key={o.id} className="card">

@@ -4,6 +4,7 @@ import { useClients, useCreateClient } from '../api/admin'
 import { ApiError } from '../api/http'
 import type { Client } from '../api/types'
 import { Banner } from '../components/Banner'
+import { LoadError } from '../components/LoadError'
 
 const KINDS: Client['kind'][] = ['trades', 'agency', 'msp', 'other']
 
@@ -36,7 +37,8 @@ export default function ClientsPage() {
         <button className="btn btn-primary" disabled={create.isPending || !name.trim()}>Add client</button>
       </form>
       {error && <Banner kind="error">{error}</Banner>}
-      {clients.data?.length === 0 && <Banner>No clients yet.</Banner>}
+      {clients.isError && <LoadError error={clients.error} what="clients" />}
+      {clients.isSuccess && clients.data.length === 0 && <Banner>No clients yet.</Banner>}
       <ul className="cards">
         {clients.data?.map((c) => (
           <li key={c.id} className="card">

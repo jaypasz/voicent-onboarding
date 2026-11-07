@@ -3,6 +3,7 @@ import { fetchTemplateYaml, useImportYaml, useInstallPresets, useTemplates } fro
 import { ApiError } from '../api/http'
 import type { YamlImportResult } from '../api/types'
 import { Banner, Problems } from '../components/Banner'
+import { LoadError } from '../components/LoadError'
 
 export default function TemplatesPage() {
   const templates = useTemplates()
@@ -39,7 +40,8 @@ export default function TemplatesPage() {
         <button className="btn" disabled={presets.isPending} onClick={() => presets.mutate()}>Install the preset templates</button>
       </div>
       {presets.data && <Banner kind="ok">{presets.data.added.length ? `Added: ${presets.data.added.join(', ')}.` : 'All the presets are already here.'}</Banner>}
-      {templates.data?.length === 0 && <Banner>No templates yet. Install the presets, or paste your own YAML below.</Banner>}
+      {templates.isError && <LoadError error={templates.error} what="templates" />}
+      {templates.isSuccess && templates.data.length === 0 && <Banner>No templates yet. Install the presets, or paste your own YAML below.</Banner>}
       <ul className="cards">
         {templates.data?.map((t) => (
           <li key={t.id} className="card row between wrap">

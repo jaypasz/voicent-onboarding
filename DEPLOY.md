@@ -38,3 +38,13 @@ Railway passes service variables to the Docker build as build args, so the two `
    `python -m app.cli seed --org-name Voicent --org-slug voicent --admin-user-id <that id> --admin-email <email>`
    (from a Railway shell, or locally with `DATABASE_URL` set). It creates the org, links the user to it and installs the four preset templates. Safe to run twice.
 5. Confirm row level security: the Supabase Data API with the publishable key must return no rows from any table.
+
+## If the admin pages say "Couldn't load ..."
+
+The page now says why. The three usual causes, in the order to check them:
+
+1. **The top right of the page says "local mode".** The site was built without `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, so it has no sign-in and the server refuses it (401). Set both on the Railway service and **redeploy**; they are baked in at build time, so a restart does nothing.
+2. **You signed in but it says the account isn't linked to an organization (403).** Run the seed command in step 4 above with your own Supabase user id. The error message shows your id and the exact command.
+3. **It says the server didn't accept your sign-in (401) while a login form was shown.** `SUPABASE_JWKS_URL` (or `SUPABASE_JWT_SECRET` for a legacy project) on Railway doesn't match the Supabase project the site signs in to.
+
+Anything else (status 500, "didn't answer") is in the Railway deploy logs. A wrong `DATABASE_URL` or migrations that didn't finish are the usual causes; the service runs `alembic upgrade head` when it starts.

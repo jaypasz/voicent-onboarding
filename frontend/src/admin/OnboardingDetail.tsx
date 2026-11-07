@@ -6,6 +6,7 @@ import {
 import { ApiError } from '../api/http'
 import type { AdminStep, Contact, LinkInfo } from '../api/types'
 import { Banner } from '../components/Banner'
+import { LoadError } from '../components/LoadError'
 import { CopyButton } from '../components/CopyButton'
 import { ProgressBar } from '../components/ProgressBar'
 import { OnboardingBadge, StepBadge } from '../components/StatusBadge'
@@ -165,7 +166,7 @@ export default function OnboardingDetail() {
   const [error, setError] = useState<string | null>(null)
 
   if (ob.isPending) return <p>Loading…</p>
-  if (ob.isError || !ob.data) return <Banner kind="error">Couldn't load this onboarding. <Link to="/">Back</Link></Banner>
+  if (ob.isError || !ob.data) return <div className="stack"><LoadError error={ob.error} what="this onboarding" /><Link to="/">← Onboardings</Link></div>
   const o = ob.data
   const client = clients.data?.find((c) => c.id === o.client_id)
   const contacts = client?.contacts ?? []
