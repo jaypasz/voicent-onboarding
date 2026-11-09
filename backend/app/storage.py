@@ -80,6 +80,25 @@ class Storage:
         except ValueError:
             return {}
 
+    def head(self, path: str, n: int) -> bytes | None:
+        """The first n bytes of an uploaded object, or None if it isn't there. Asks for a byte range and stops
+        reading after n bytes even if storage ignores the range, so a large file is never pulled in whole."""
+        url = self._url("object", "authenticated", self.s.upload_bucket, quote(path))
+        try:
+            with self.http.stream("GET", url, headers={**self._headers(), "Range": f"bytes=0-{n - 1}"}) as r:
+                if r.status_code in (400, 404):
+                    return None
+                if r.status_code >= 300:
+                    raise StorageError(f"File storage couldn't read the file (status {r.status_code}).")
+                buf = b""
+                for chunk in r.iter_bytes():
+                    buf += chunk
+                    if len(buf) >= n:
+                        break
+                return buf[:n]
+        except httpx.HTTPError:
+            raise StorageError("File storage didn't answer (read upload). Try again in a minute.") from None
+
     def signed_download(self, path: str, ttl: int = 600) -> str:
         r = self._call("POST", self._url("object", "sign", self.s.upload_bucket, quote(path)), "prepare download", json={"expiresIn": ttl})
         if r.status_code >= 300:
@@ -89,6 +108,14 @@ class Storage:
         except (ValueError, KeyError, TypeError):
             raise StorageError("File storage gave an unexpected answer (prepare download).") from None
         return self.s.supabase_url + "/storage/v1" + u if u.startswith("/") else u
+
+
+def stored_content_type(info: dict) -> str:
+    """The content type storage recorded for an object. Supabase's info call answers in snake_case; the object's
+    metadata block carries it as mimetype. Parameters such as '; charset=utf-8' are dropped."""
+    meta = info.get("metadata") if isinstance(info.get("metadata"), dict) else {}
+    raw = info.get("content_type") or info.get("contentType") or info.get("mimetype") or meta.get("mimetype") or meta.get("contentType") or ""
+    return str(raw).split(";", 1)[0].strip().lower()
 
 
 def check_upload_request(config: dict, name: str, size: int, content_type: str) -> None:

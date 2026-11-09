@@ -14,6 +14,7 @@ from tests.conftest import JWT_SECRET, SERVICE_TOKEN
 
 KEY = "portal-signing-key-0123456789-abcdef"
 PNG = "image/png"
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
 
 DOC = {
     "name": "Mini", "slug": "mini", "layout": "checklist",
@@ -36,14 +37,24 @@ class FakeStorage:
     """Stands in for Supabase Storage so no network is touched."""
 
     def __init__(self):
-        self.objects: dict[str, int] = {}
+        self.objects: dict[str, tuple[bytes, str]] = {}
+
+    def put(self, path, data: bytes, content_type: str = PNG):
+        """What the browser does with the signed URL: it picks the bytes and the content type, not us."""
+        self.objects[path] = (data, content_type)
 
     def signed_upload(self, path):
         self.last_path = path
         return {"url": f"https://store.test/upload/{path}", "token": "tok"}
 
     def info(self, path):
-        return {"size": self.objects[path]} if path in self.objects else None
+        if path not in self.objects:
+            return None
+        data, ctype = self.objects[path]
+        return {"size": len(data), "content_type": ctype}
+
+    def head(self, path, n):
+        return self.objects[path][0][:n] if path in self.objects else None
 
     def signed_download(self, path, ttl=600):
         return f"https://store.test/download/{path}?exp={ttl}"
@@ -384,7 +395,7 @@ def test_upload_flow_and_checks(api, app):
     # claiming a file that hasn't finished uploading is refused
     pending = api.put("/api/portal/steps/logo", json={"data": {"file_ids": [out["file_id"]]}}, headers=s)
     assert pending.status_code == 422 and "finished uploading" in pending.text
-    store.objects[store.last_path] = 500
+    store.put(store.last_path, PNG_BYTES.ljust(500, b"\x00"))
     done = api.put("/api/portal/steps/logo", json={"data": {"file_ids": [out["file_id"]]}}, headers=s)
     assert done.status_code == 200 and done.json()["status"] == "done" and done.json()["files"][0]["size"] == 500
     # a file id from another step or onboarding can't be claimed
@@ -398,7 +409,7 @@ def test_files_from_another_onboarding_cannot_be_claimed(api, app):
     _, t2, _ = live(api, h, name="Two")
     s1, s2 = session(api, t1["owner"]), session(api, t2["owner"])
     f = api.post("/api/portal/steps/logo/upload-url", json={"name": "a.png", "size": 5, "content_type": PNG}, headers=s1).json()
-    app.state.storage.objects[app.state.storage.last_path] = 5
+    app.state.storage.put(app.state.storage.last_path, PNG_BYTES[:5])
     r = api.put("/api/portal/steps/logo", json={"data": {"file_ids": [f["file_id"]]}}, headers=s2)
     assert r.status_code == 422
 
@@ -473,3 +484,70 @@ def test_rate_limiter_window_and_memory():
     t[0] = 200
     lim.allow("trigger")
     assert len(lim._hits) < 10_100
+
+
+# ---------------------------------------------------------------- upload slots and real file types
+
+def _age_files(app, hours=3):
+    with app.state.sessionmaker() as db:
+        for f in db.query(m.File).all():
+            f.created_at = f.created_at - dt.timedelta(hours=hours)
+        db.commit()
+
+
+def test_abandoned_upload_urls_stop_counting_once_they_expire(api, app):
+    seed_org(app)
+    _, tokens, _ = live(api, admin())
+    s = session(api, tokens["owner"])
+    url, body = "/api/portal/steps/logo/upload-url", {"name": "a.png", "size": 5, "content_type": PNG}
+    for _ in range(8):  # max_files 2 x 4: the abuse cap
+        assert api.post(url, json=body, headers=s).status_code == 200
+    assert api.post(url, json=body, headers=s).status_code == 422  # a burst is still capped
+    _age_files(app)  # none of those were ever uploaded, and their URLs have expired
+    assert api.post(url, json=body, headers=s).status_code == 200  # the client isn't locked out
+
+
+def test_files_in_the_answer_keep_counting_after_their_url_expires(api, app):
+    seed_org(app)
+    _, tokens, _ = live(api, admin())
+    s = session(api, tokens["owner"])
+    store: FakeStorage = app.state.storage
+    url, body = "/api/portal/steps/logo/upload-url", {"name": "a.png", "size": 5, "content_type": PNG}
+    ids = []
+    for _ in range(2):
+        ids.append(api.post(url, json=body, headers=s).json()["file_id"])
+        store.put(store.last_path, PNG_BYTES)
+    assert api.put("/api/portal/steps/logo", json={"data": {"file_ids": ids}}, headers=s).status_code == 200
+    _age_files(app)
+    for _ in range(6):  # 8 minus the 2 kept files
+        assert api.post(url, json=body, headers=s).status_code == 200
+    assert api.post(url, json=body, headers=s).status_code == 422
+
+
+@pytest.mark.parametrize("data, ctype", [
+    (PNG_BYTES, "image/svg+xml"),                                     # the finding: stored type isn't the declared one
+    (PNG_BYTES, "application/pdf"),                                   # another allowed type, but not this file's
+    (b'<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>', PNG),  # labelled PNG, really SVG
+    (b"%PDF-1.7\n", PNG),                                             # a real PDF named .png
+])
+def test_an_upload_whose_stored_type_or_bytes_dont_match_is_refused(api, app, data, ctype):
+    seed_org(app)
+    _, tokens, _ = live(api, admin())
+    s = session(api, tokens["owner"])
+    store: FakeStorage = app.state.storage
+    f = api.post("/api/portal/steps/logo/upload-url", json={"name": "logo.png", "size": len(data), "content_type": PNG}, headers=s).json()
+    store.put(store.last_path, data, ctype)
+    r = api.put("/api/portal/steps/logo", json={"data": {"file_ids": [f["file_id"]]}}, headers=s)
+    assert r.status_code == 422 and "isn't a png file" in r.text
+    store.put(store.last_path, PNG_BYTES, PNG)  # uploading it again properly works
+    assert api.put("/api/portal/steps/logo", json={"data": {"file_ids": [f["file_id"]]}}, headers=s).status_code == 200
+
+
+def test_stored_type_with_charset_or_in_metadata_is_understood(api, app):
+    seed_org(app)
+    _, tokens, _ = live(api, admin())
+    s = session(api, tokens["owner"])
+    store: FakeStorage = app.state.storage
+    f = api.post("/api/portal/steps/logo/upload-url", json={"name": "a.pdf", "size": 9, "content_type": "application/pdf"}, headers=s).json()
+    store.put(store.last_path, b"%PDF-1.7\n", "application/pdf; charset=binary")
+    assert api.put("/api/portal/steps/logo", json={"data": {"file_ids": [f["file_id"]]}}, headers=s).status_code == 200
