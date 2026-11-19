@@ -138,6 +138,15 @@ class Onboarding(Stamped, Base):
     # A change is never lost, even if it lands while a sync is running: the two just differ until the next pass.
     sync_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     synced_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Asking Voicent-App for a workspace when a template with on_complete: provision_voicent_workspace is finished (provision.py).
+    # provision_state: None (nothing asked for yet) | pending | delivered | failed. Retries reuse provision_delivery_id.
+    provision_state: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    provision_delivery_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    provision_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    provision_next_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    provision_error: Mapped[str] = mapped_column(String(300), default="", server_default="")  # our own wording, never the receiver's
+    provisioned_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    voicent_workspace_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
     client: Mapped[Client] = relationship(back_populates="onboardings")
     steps: Mapped[list["Step"]] = relationship(back_populates="onboarding", cascade="all, delete-orphan", order_by="Step.position")

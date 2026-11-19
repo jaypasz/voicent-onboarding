@@ -109,6 +109,7 @@ export interface TemplateDetail extends TemplateSummary {
 }
 
 export type Attention = 'nudges_exhausted' | 'unreachable' | null
+export type ProvisionState = 'pending' | 'delivered' | 'failed' | null
 
 export interface OnboardingSummary {
   id: string
@@ -121,6 +122,7 @@ export interface OnboardingSummary {
   last_activity_at: string
   nudges_paused: boolean
   attention: Attention
+  provision_state: ProvisionState
   progress: Progress
 }
 
@@ -177,6 +179,7 @@ export interface Features {
   aios_sync: boolean
   uploads: boolean
   jobs: boolean
+  provisioning: boolean
 }
 
 export interface NudgeResult {
@@ -203,4 +206,17 @@ export interface SyncState {
   project_id: string | null
   log: { at: string; status: string; detail: string }[]
   result?: { ok: boolean; state: string; message: string; changes: number }
+}
+
+export interface ProvisionStatus {
+  enabled: boolean
+  wanted: boolean
+  state: 'not_wanted' | 'off' | 'waiting' | 'pending' | 'delivered' | 'failed'
+  workspace_id: string | null
+  attempts: number
+  next_attempt_at: string | null
+  delivered_at: string | null
+  error: string
+  log: { at: string; status: string; detail: string }[]
+  result?: { ok: boolean; state: string; message: string }
 }

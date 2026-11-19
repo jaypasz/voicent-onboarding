@@ -17,6 +17,7 @@ from .notify import Notifier
 from .config import Settings
 from .db import Base, make_engine
 from .errors import ServiceError
+from .provision import Sender as ProvisionSender
 from .ratelimit import RateLimiter
 from .routers import clients, health, onboardings, portal, templates
 from .storage import Storage
@@ -57,6 +58,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.notifier = Notifier(settings)
     app.state.clock = lambda: dt.datetime.now(dt.timezone.utc)  # a seam so tests can say what time it is
     app.state.aios = AiosClient(settings) if settings.aios_sync_enabled else None
+    app.state.provisioner = ProvisionSender(settings) if settings.provisioning_enabled else None
     app.state.limit_exchange_ip = RateLimiter(settings.rate_exchange_per_ip)
     app.state.limit_exchange_all = RateLimiter(settings.rate_exchange_global)
     app.state.limit_writes = RateLimiter(settings.rate_writes_per_link)

@@ -4,6 +4,7 @@
   python -m app.cli presets --org-slug voicent
   python -m app.cli nudge [--dry-run]     # one pass of client reminders (the web service already does this on a timer)
   python -m app.cli sync                  # one pass of the AIOS sync
+  python -m app.cli provision [--dry-run] # send any Voicent workspace requests that are due
 
 Needs DATABASE_URL (the same variable the server reads). Safe to run twice.
 """
@@ -73,6 +74,27 @@ def run_sync(settings: Settings, out=print) -> None:
     out("AIOS sync is off: set AIOS_API_URL and AIOS_SERVICE_TOKEN." if not r["enabled"] else f"AIOS sync: {r['synced']} up to date, {r['failed']} failed.")
 
 
+def run_provision(settings: Settings, dry_run: bool, out=print) -> None:
+    import datetime as dt
+
+    from . import provision
+
+    engine = make_engine(settings.database_url)
+    sm = sessionmaker(engine, expire_on_commit=False)
+    if dry_run:
+        now = dt.datetime.now(dt.timezone.utc)
+        with sm() as db:
+            due = list(db.scalars(select(m.Onboarding).where(m.Onboarding.status == "completed", m.Onboarding.provision_state == "pending",
+                                                              m.Onboarding.provision_next_at <= now)))
+            out(f"Would ask Voicent-App for {len(due)} workspace(s){'' if settings.provisioning_enabled else ' (provisioning is off: set VOICENT_PROVISION_URL and VOICENT_PROVISION_SECRET)'}.")
+            for ob in due:
+                out(f"  {ob.title} (attempt {ob.provision_attempts + 1}, delivery {ob.provision_delivery_id})")
+        return
+    r = provision.deliver_due(sm, settings)
+    out("Provisioning is off: set VOICENT_PROVISION_URL and VOICENT_PROVISION_SECRET." if not r["enabled"]
+        else f"Voicent provisioning: {r['delivered']} delivered, {r['failed']} not yet.")
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="python -m app.cli", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -86,12 +108,16 @@ def main(argv: list[str] | None = None) -> int:
     nd = sub.add_parser("nudge", help="run one pass of client reminders")
     nd.add_argument("--dry-run", action="store_true", help="say who would be reminded, send nothing")
     sub.add_parser("sync", help="run one pass of the AIOS sync")
+    pv = sub.add_parser("provision", help="send any Voicent workspace requests that are due")
+    pv.add_argument("--dry-run", action="store_true", help="say what would be sent, send nothing")
     a = p.parse_args(argv)
     settings = Settings.from_env()
     if a.cmd == "nudge":
         run_nudge(settings, a.dry_run)
     elif a.cmd == "sync":
         run_sync(settings)
+    elif a.cmd == "provision":
+        run_provision(settings, a.dry_run)
     elif a.cmd == "seed":
         seed(settings, a.org_name, a.org_slug, a.admin_user_id, a.admin_email)
     else:

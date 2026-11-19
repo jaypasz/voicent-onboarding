@@ -1,4 +1,4 @@
-"""The background jobs (reminders and AIOS sync) and the thread that runs them.
+"""The background jobs (reminders, AIOS sync, Voicent provisioning) and the thread that runs them.
 
 They run inside the web process because this is one small service. That means: run one instance. If it is ever scaled out,
 reminders are still safe (a unique constraint refuses a second send of the same one) and so is the sync (it reconciles), but
@@ -12,15 +12,17 @@ import threading
 
 from sqlalchemy.orm import sessionmaker
 
-from . import aios_sync, nudges
+from . import aios_sync, nudges, provision
 from .aios import AiosClient
 from .config import Settings
 from .notify import Notifier
+from .provision import Sender as ProvisionSender
 
 log = logging.getLogger("uvicorn.error")
 
 
-def run_once(sm: sessionmaker, settings: Settings, notifier: Notifier | None = None, aios: AiosClient | None = None, now=None) -> dict:
+def run_once(sm: sessionmaker, settings: Settings, notifier: Notifier | None = None, aios: AiosClient | None = None, now=None,
+             provisioner: ProvisionSender | None = None) -> dict:
     """One pass of every job. A failure in one is logged and never stops the others or the loop."""
     out: dict = {}
     try:
@@ -34,6 +36,11 @@ def run_once(sm: sessionmaker, settings: Settings, notifier: Notifier | None = N
     except Exception:  # noqa: BLE001
         log.error("AIOS sync job failed", exc_info=True)
         out["aios"] = {"error": True}
+    try:
+        out["provisioning"] = provision.deliver_due(sm, settings, provisioner, now=now)
+    except Exception:  # noqa: BLE001
+        log.error("Provisioning job failed", exc_info=True)
+        out["provisioning"] = {"error": True}
     return out
 
 

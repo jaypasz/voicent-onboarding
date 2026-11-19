@@ -14,6 +14,7 @@ import { dueLabel, formatDateTime } from '../lib/format'
 import StepResponse from './StepResponse'
 import AiosPanel from './AiosPanel'
 import RemindersPanel from './RemindersPanel'
+import VoicentPanel from './VoicentPanel'
 
 function errText(e: unknown): string {
   return e instanceof ApiError ? [e.message, ...e.problems].join(' ') : 'That did not work.'
@@ -219,6 +220,7 @@ export default function OnboardingDetail() {
       <LinksPanel id={id} contacts={contacts} issued={issued} onIssued={setIssued} />
       <RemindersPanel ob={o} />
       <AiosPanel ob={o} />
+      <VoicentPanel ob={o} />
     </div>
   )
 }

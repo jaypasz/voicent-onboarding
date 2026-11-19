@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from .. import aios_sync, magic_link, portal
+from .. import aios_sync, magic_link, portal, provision
 from ..deps import Db, PortalCtx, Session, limit_writes
 
 router = APIRouter(prefix="/portal", tags=["portal"])
@@ -70,6 +70,7 @@ def get_onboarding(db: Session = Db, ctx=PortalCtx):
 def submit(key: str, body: AnswerIn, request: Request, background: BackgroundTasks, db: Session = Db, ctx=PortalCtx):
     limit_writes(request, ctx)
     aios_sync.kick(request, background, ctx.link.org_id, ctx.onboarding.id)  # runs after the answer is saved and the response has gone
+    provision.kick(request, background, ctx.link.org_id, ctx.onboarding.id)  # if that answer finished the onboarding
     return portal.submit(db, ctx, key, body.data, request.app.state.storage)
 
 

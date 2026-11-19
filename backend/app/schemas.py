@@ -142,7 +142,7 @@ def onboarding_summary(ob: m.Onboarding) -> dict:
     return {
         "id": ob.id, "client_id": ob.client_id, "title": ob.title, "layout": ob.layout, "status": ob.status,
         "started_at": ob.started_at, "completed_at": ob.completed_at, "last_activity_at": ob.last_activity_at,
-        "nudges_paused": ob.nudges_paused, "attention": ob.attention,
+        "nudges_paused": ob.nudges_paused, "attention": ob.attention, "provision_state": ob.provision_state,
         "progress": {"done": sum(1 for s in live if s.status == "done"), "total": len(live)},
     }
 

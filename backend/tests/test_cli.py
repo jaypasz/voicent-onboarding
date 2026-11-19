@@ -40,3 +40,27 @@ def test_presets_command_refuses_an_unknown_org(tmp_path):
 
     with pytest.raises(SystemExit):
         cli.presets(Settings(database_url=f"sqlite:///{tmp_path / 'x.db'}", auth_disabled=True, app_env="local"), "nope", out=lambda *_: None)
+
+
+def test_provision_dry_run_lists_what_is_due_and_sends_nothing(tmp_path):
+    import datetime as dt
+
+    from app import models as m
+
+    url = f"sqlite:///{tmp_path / 'p.db'}"
+    settings = Settings(database_url=url, auth_disabled=True, app_env="local")
+    org_id = cli.seed(settings, "Voicent", "voicent", out=lambda *_: None)
+    with cli._session(settings) as db:
+        cl = m.Client(org_id=org_id, name="Acme")
+        db.add(cl)
+        db.flush()
+        db.add(m.Onboarding(org_id=org_id, client_id=cl.id, title="Acme kickoff", status="completed", document={"steps": []},
+                            provision_state="pending", provision_delivery_id="d-1", provision_next_at=dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)))
+        db.commit()
+    lines = []
+    cli.run_provision(settings, dry_run=True, out=lines.append)
+    assert lines[0].startswith("Would ask Voicent-App for 1 workspace(s)") and "provisioning is off" in lines[0]
+    assert "Acme kickoff (attempt 1, delivery d-1)" in lines[1]
+    lines.clear()
+    cli.run_provision(settings, dry_run=False, out=lines.append)
+    assert lines == ["Provisioning is off: set VOICENT_PROVISION_URL and VOICENT_PROVISION_SECRET."]
