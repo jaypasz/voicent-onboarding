@@ -180,6 +180,8 @@ class Onboarding(Stamped, Base):
     provision_delivery_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     provision_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     provision_next_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Set while a send is in flight, cleared when it reports back. "Send it now" waits for it rather than sending alongside it.
+    provision_lease_until: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     provision_error: Mapped[str] = mapped_column(String(300), default="", server_default="")  # our own wording, never the receiver's
     provisioned_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     voicent_workspace_id: Mapped[str | None] = mapped_column(String(120), nullable=True)

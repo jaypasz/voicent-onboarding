@@ -454,3 +454,49 @@ def test_if_file_links_cant_be_made_the_request_waits_and_is_tried_again(w):
     w.app.state.storage.fail = False
     r = provision.deliver(w.sm, w.settings, ob.org_id, oid, w.app.state.provisioner, manual=True, storage=w.app.state.storage)
     assert r.state == "delivered" and w.voicent.bodies()[0]["files"][0]["url"].startswith("https://store.test/")
+
+
+def test_send_it_now_waits_for_a_send_already_in_flight_rather_than_sending_alongside_it(w):
+    oid, _ = live(w)
+    org_id = None
+    seen = []
+
+    def jay_clicks_send_now():
+        if not seen:  # while the first request is in flight, Jay asks for it now (which also resets the retry time)
+            with w.sm() as db:
+                provision.request_again(db.get(m.Onboarding, oid), dt.datetime.now(dt.timezone.utc))
+                db.commit()
+            seen.append(provision.deliver(w.sm, w.settings, org_id, oid, w.app.state.provisioner, manual=True))
+
+    finish(w, oid, last=False)
+    org_id = w.get(oid).org_id
+    w.voicent.during = jay_clicks_send_now
+    w.api.put(f"/api/onboardings/{oid}/steps/basics", json={"data": {"answers": {"name": "Acme"}}})
+    assert seen and seen[0].state == "skipped" and "right now" in seen[0].message
+    ob = state(w, oid)
+    assert len(w.voicent.requests) == 1 and ob.provision_state == "delivered" and ob.provision_lease_until is None
+
+
+def test_send_it_now_still_skips_the_wait_for_a_retry(w):
+    oid, _ = live(w)
+    w.voicent.replies = [500]
+    finish(w, oid)
+    ob = state(w, oid)
+    assert ob.provision_state == "pending" and ob.provision_lease_until is None  # the failed try reported back
+    r = w.api.post(f"/api/onboardings/{oid}/provision").json()
+    assert r["result"]["state"] == "delivered" and len(w.voicent.requests) == 2
+
+
+def test_finishing_again_after_a_delivery_failed_for_good_does_not_start_it_over(w):
+    oid, _ = live(w)
+    w.voicent.replies = [422]
+    finish(w, oid)
+    ob = state(w, oid)
+    assert ob.provision_state == "failed"
+    old = ob.provision_delivery_id
+    assert w.api.post(f"/api/onboardings/{oid}/steps/basics/reopen").status_code == 200
+    assert w.api.put(f"/api/onboardings/{oid}/steps/basics", json={"data": {"answers": {"name": "Acme"}}}).status_code == 200
+    ob = state(w, oid)
+    assert w.get(oid).status == "completed"
+    assert ob.provision_state == "failed" and ob.provision_delivery_id == old and "refused it (status 422)" in ob.provision_error
+    assert len(w.voicent.requests) == 1  # only Jay's "send it again" starts it over

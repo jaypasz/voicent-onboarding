@@ -36,7 +36,7 @@ import uuid
 from dataclasses import dataclass
 
 import httpx
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from . import models as m
@@ -78,11 +78,12 @@ def wants_provisioning(ob: m.Onboarding) -> bool:
 # ---------------------------------------------------------------- queueing (called from services)
 
 def queue(ob: m.Onboarding, now: dt.datetime) -> bool:
-    """Line up a delivery for an onboarding that has just been finished. A delivery that is already waiting or already went
-    through is left alone, so finishing, reopening and finishing again doesn't send twice. Only for a paying client: the other
-    half of the trigger is services.set_client_paying, so it goes out when both are true, whichever comes second. True if one
-    was queued."""
-    if not wants_provisioning(ob) or ob.provision_state in ("pending", "delivered"):
+    """Line up a delivery for an onboarding that has just been finished. A delivery that is already waiting, already went
+    through or failed for good is left alone, so finishing, reopening and finishing again doesn't send twice, and doesn't
+    quietly start a refused or given-up delivery over: only request_again (Jay's own "send it again") does that. Only for a
+    paying client: the other half of the trigger is services.set_client_paying, so it goes out when both are true, whichever
+    comes second. True if one was queued."""
+    if not wants_provisioning(ob) or ob.provision_state in ("pending", "delivered", "failed"):
         return False
     if not (ob.client and ob.client.paying_since):
         return False  # a prospect stays out of Voicent-App until they pay; marking them paying queues it then
@@ -267,15 +268,22 @@ def deliver(sm: sessionmaker, settings: Settings, org_id: str, onboarding_id: st
     try:
         with sm() as db:
             due = m.Onboarding.provision_next_at <= now
+            # A send already in flight holds a lease. Jay's "send it now" skips the wait for a retry, never another send's lease.
+            free = or_(m.Onboarding.provision_lease_until.is_(None), m.Onboarding.provision_lease_until <= now)
             claimed = db.execute(
                 update(m.Onboarding)
                 .where(m.Onboarding.id == onboarding_id, m.Onboarding.org_id == org_id, m.Onboarding.status == "completed",
-                       m.Onboarding.provision_state == "pending", *(() if manual else (due,)))
-                .values(provision_next_at=now + LEASE, provision_attempts=m.Onboarding.provision_attempts + 1)
+                       m.Onboarding.provision_state == "pending", free, *(() if manual else (due,)))
+                .values(provision_next_at=now + LEASE, provision_lease_until=now + LEASE,
+                        provision_attempts=m.Onboarding.provision_attempts + 1)
                 .execution_options(synchronize_session=False)
             ).rowcount
             db.commit()
             if not claimed:
+                busy = manual and db.scalar(select(m.Onboarding.provision_lease_until).where(
+                    m.Onboarding.id == onboarding_id, m.Onboarding.org_id == org_id, m.Onboarding.provision_state == "pending"))
+                if busy and _aware(busy) > now:
+                    return DeliveryResult(True, "skipped", "It's being sent to Voicent-App right now. The result will show here.")
                 return DeliveryResult(True, "skipped", "Nothing is waiting to go to Voicent-App.")
             ob = db.scalar(select(m.Onboarding).where(m.Onboarding.id == onboarding_id, m.Onboarding.org_id == org_id))
             try:
@@ -296,6 +304,7 @@ def _storage(settings: Settings):
 
 def _record(db: Session, ob: m.Onboarding, reply: Reply, now: dt.datetime, what: str | None = None) -> DeliveryResult:
     s = reply.status
+    ob.provision_lease_until = None  # this send has reported back, whatever it says
     if 200 <= s < 300:
         ob.provision_state, ob.provisioned_at, ob.provision_next_at, ob.provision_error = "delivered", now, None, ""
         if reply.workspace_id:
