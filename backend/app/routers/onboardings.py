@@ -10,7 +10,7 @@ from .. import aios_sync, magic_link, models as m, provision, services
 from .. import nudges as reminders
 from ..deps import Actor, Auth, Db, Org, Session
 from ..errors import NotFound
-from ..schemas import CommentIn, NudgesIn, OnboardingIn, StepAnswerIn, comment_out, onboarding_detail, onboarding_summary, step_out
+from ..schemas import CommentIn, NudgesIn, OnboardingIn, OnboardingStepsIn, StepAnswerIn, comment_out, onboarding_detail, onboarding_summary, step_out
 from ..storage import UploadsOff
 
 router = APIRouter(prefix="/onboardings", tags=["onboardings"])
@@ -28,12 +28,30 @@ def list_onboardings(status: str | None = None, client_id: str | None = None, db
 
 @router.post("", status_code=201)
 def create(body: OnboardingIn, db: Session = Db, org: str = Org):
-    return onboarding_detail(services.create_onboarding(db, org, client_id=body.client_id, template_id=body.template_id, title=body.title, version=body.version))
+    return onboarding_detail(services.create_onboarding(
+        db, org, client_id=body.client_id, template_id=body.template_id, title=body.title, version=body.version, sections=body.sections, steps=body.steps))
 
 
 @router.get("/{onboarding_id}")
 def get(onboarding_id: str, db: Session = Db, org: str = Org):
     return onboarding_detail(services.get_onboarding(db, org, onboarding_id))
+
+
+def _document(ob: m.Onboarding) -> dict:
+    return {"document": ob.document, "editable": ob.status == "draft", "locked": services.locked_step_keys(ob)}
+
+
+@router.get("/{onboarding_id}/document")
+def get_document(onboarding_id: str, db: Session = Db, org: str = Org):
+    """This onboarding's own copy of its template: what the step builder edits, and what "save as template" starts from."""
+    return _document(services.get_onboarding(db, org, onboarding_id))
+
+
+@router.put("/{onboarding_id}/document")
+def put_document(onboarding_id: str, body: OnboardingStepsIn, db: Session = Db, org: str = Org):
+    """Replace a draft's sections and steps. Steps that already hold answers, files or comments can't be removed or change type."""
+    ob = services.update_onboarding_steps(db, org, onboarding_id, sections=body.sections, steps=body.steps)
+    return onboarding_detail(ob) | _document(ob)
 
 
 class LinkIn(BaseModel):

@@ -204,11 +204,12 @@ export default function OnboardingDetail() {
         {o.status === 'active' && <button className="btn" onClick={() => run(() => act.mutateAsync('pause'))}>Pause</button>}
         {o.status === 'paused' && <button className="btn btn-primary" onClick={() => run(() => act.mutateAsync('resume'))}>Resume</button>}
         {o.status !== 'archived' && <button className="btn" onClick={() => window.confirm('Archive this onboarding? Client links stop working.') && run(() => act.mutateAsync('archive'))}>Archive</button>}
+        <Link className="btn" to={`/onboardings/${id}/steps`}>{o.status === 'draft' ? 'Edit steps' : 'Save steps as a template'}</Link>
       </div>
       {o.attention === 'nudges_exhausted' && <Banner kind="warn"><strong>Needs you.</strong> This client hasn't replied to the reminders, and they have stopped. A call or a message from you might help.</Banner>}
       {o.attention === 'unreachable' && <Banner kind="warn"><strong>Needs you.</strong> There's no email address or consented phone number to reach this client on, so reminders can't go out. <Link to={`/clients/${o.client_id}`}>Add one on the client page</Link>.</Banner>}
       {o.status === 'draft' && contacts.length === 0 && <Banner kind="warn">This client has no contacts yet, so there is nobody to send a link to. <Link to={`/clients/${o.client_id}`}>Add a contact</Link>.</Banner>}
-      {o.status === 'draft' && <Banner>This is a draft. The client can't see anything until you send it.</Banner>}
+      {o.status === 'draft' && <Banner>This is a draft. The client can't see anything until you send it, and you can still <Link to={`/onboardings/${id}/steps`}>change the steps</Link>.</Banner>}
 
       {sections.map((g, i) => (
         <section key={`${g.key}-${i}`} className="section" aria-label={pretty(g.key)}>

@@ -221,13 +221,32 @@ def list_onboardings(db: Session, org_id: str, status: str | None = None, client
     return list(db.scalars(q))
 
 
-def create_onboarding(db: Session, org_id: str, *, client_id: str, template_id: str, title: str = "", version: int | None = None) -> m.Onboarding:
-    """Copy the template version into the onboarding. Editing the template afterwards changes nothing here."""
+def _with_steps(doc: dict, sections: list | None, steps: list | None) -> dict:
+    """The document with its sections and steps swapped for the ones given, validated like any template.
+    Only sections and steps can be customised per client: the name, slug, layout and on_complete stay the template's."""
+    if sections is None and steps is None:
+        return doc
+    return loader.check({**doc, "sections": doc["sections"] if sections is None else sections, "steps": doc["steps"] if steps is None else steps})
+
+
+def _assignee(contacts: list[m.Contact], role: str) -> str | None:
+    c = next((c for c in contacts if role and c.role == role), None)
+    return c.id if c else None
+
+
+def _contacts(db: Session, org_id: str, client_id: str) -> list[m.Contact]:
+    return list(db.scalars(select(m.Contact).where(m.Contact.client_id == client_id, m.Contact.org_id == org_id).order_by(m.Contact.created_at)))
+
+
+def create_onboarding(db: Session, org_id: str, *, client_id: str, template_id: str, title: str = "", version: int | None = None,
+                      sections: list | None = None, steps: list | None = None) -> m.Onboarding:
+    """Copy the template version into the onboarding. Editing the template afterwards changes nothing here.
+    With sections or steps, this client gets a customised copy; the template itself is not touched."""
     client = _client(db, org_id, client_id)
     t = _template(db, org_id, template_id)
     tv = template_document(db, org_id, t, version)
-    doc = copy.deepcopy(tv.document)
-    contacts = list(db.scalars(select(m.Contact).where(m.Contact.client_id == client.id, m.Contact.org_id == org_id).order_by(m.Contact.created_at)))
+    doc = _with_steps(copy.deepcopy(tv.document), sections, steps)
+    contacts = _contacts(db, org_id, client.id)
     ob = m.Onboarding(
         org_id=org_id, client_id=client.id, template_version_id=tv.id, title=redact(title.strip()) or f"{doc['name']}: {client.name}",
         layout=doc["layout"], status="draft", document=doc,
@@ -235,12 +254,59 @@ def create_onboarding(db: Session, org_id: str, *, client_id: str, template_id: 
     db.add(ob)
     db.flush()
     for i, s in enumerate(doc["steps"]):
-        assignee = next((c for c in contacts if s["assignee_role"] and c.role == s["assignee_role"]), None)
         ob.steps.append(m.Step(
             org_id=org_id, key=s["key"], type=s["type"], title=s["title"], section=s["section"], position=i,
-            visibility=s["visibility"], assignee_contact_id=assignee.id if assignee else None,
+            visibility=s["visibility"], assignee_contact_id=_assignee(contacts, s["assignee_role"]),
         ))
     db.flush()
+    return ob
+
+
+def _has_data(step: m.Step) -> bool:
+    return bool(step.responses or step.files or step.comments)
+
+
+def locked_step_keys(ob: m.Onboarding) -> list[str]:
+    """Steps that already hold answers, files or comments: they can be edited but not removed or turned into another type."""
+    return [s.key for s in ob.steps if _has_data(s)]
+
+
+def update_onboarding_steps(db: Session, org_id: str, onboarding_id: str, *, sections: list, steps: list) -> m.Onboarding:
+    """Replace a draft onboarding's sections and steps. Only drafts: once the client has a link, the AIOS tasks, the
+    completion check and the client's own progress all depend on the steps, so they stay as they were sent."""
+    ob = _onboarding(db, org_id, onboarding_id)
+    if ob.status != "draft":
+        raise Conflict(f"Steps can only be changed while the onboarding is a draft; this one is {ob.status}.")
+    doc = _with_steps(ob.document, sections, steps)
+    wanted = {d["key"]: d for d in doc["steps"]}
+    existing = {s.key: s for s in ob.steps}
+    problems = []
+    for key, s in existing.items():
+        if not _has_data(s):
+            continue
+        if key not in wanted:
+            problems.append(f"'{s.title}' already has answers, files or comments, so it can't be removed.")
+        elif wanted[key]["type"] != s.type:
+            problems.append(f"'{s.title}' already has answers, files or comments, so its type can't change.")
+    if problems:
+        raise Conflict("Some steps can't be changed.", problems)
+    old_roles = {d["key"]: d.get("assignee_role", "") for d in ob.document["steps"]}
+    contacts = _contacts(db, org_id, ob.client_id)
+    for key, s in existing.items():
+        if key not in wanted:
+            ob.steps.remove(s)  # delete-orphan removes the row
+    for i, d in enumerate(doc["steps"]):
+        s = existing.get(d["key"])
+        if s is None:
+            s = m.Step(org_id=org_id, key=d["key"], assignee_contact_id=_assignee(contacts, d["assignee_role"]))
+            ob.steps.append(s)
+        elif old_roles.get(d["key"], "") != d["assignee_role"]:
+            s.assignee_contact_id = _assignee(contacts, d["assignee_role"])
+        s.type, s.title, s.section, s.position, s.visibility = d["type"], d["title"], d["section"], i, d["visibility"]
+    ob.document = doc  # a new object, so the JSON column is seen as changed
+    ob.sync_version += 1
+    db.flush()
+    db.expire(ob, ["steps"])  # reload in position order
     return ob
 
 

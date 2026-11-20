@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { request } from './http'
 import type {
-  Client, Contact, Features, LinkInfo, NudgeResult, NudgeRow, OnboardingDetail, OnboardingStatus, OnboardingSummary, ProvisionStatus, SentOnboarding, SyncState, TemplateDetail,
+  Client, Contact, Features, OnboardingDocument, TemplateCheck, LinkInfo, NudgeResult, NudgeRow, OnboardingDetail, OnboardingStatus, OnboardingSummary, ProvisionStatus, SentOnboarding, SyncState, TemplateDetail,
   TemplateSummary, YamlImportResult,
 } from './types'
+import type { SectionDoc, StepDoc, TemplateDoc } from '../builder/doc'
 
 const k = {
   clients: ['clients'] as const,
@@ -17,7 +18,7 @@ const k = {
 
 export const useClients = () => useQuery({ queryKey: k.clients, queryFn: () => request<Client[]>('/clients') })
 export const useTemplates = () => useQuery({ queryKey: k.templates, queryFn: () => request<TemplateSummary[]>('/templates') })
-export const useTemplate = (id: string) => useQuery({ queryKey: ['template', id], queryFn: () => request<TemplateDetail>(`/templates/${id}`) })
+export const useTemplate = (id: string) => useQuery({ queryKey: ['template', id], queryFn: () => request<TemplateDetail>(`/templates/${id}`), enabled: !!id })
 export const useOnboardings = (status?: OnboardingStatus | '') =>
   useQuery({ queryKey: [...k.onboardings, status ?? ''], queryFn: () => request<OnboardingSummary[]>(`/onboardings${status ? `?status=${status}` : ''}`) })
 export const useOnboarding = (id: string) => useQuery({ queryKey: k.onboarding(id), queryFn: () => request<OnboardingDetail>(`/onboardings/${id}`) })
@@ -25,6 +26,8 @@ export const useFeatures = () => useQuery({ queryKey: ['features'], queryFn: () 
 export const useNudgeHistory = (id: string) => useQuery({ queryKey: ['nudges', id], queryFn: () => request<NudgeRow[]>(`/onboardings/${id}/nudges`) })
 export const useSyncStatus = (id: string) => useQuery({ queryKey: ['sync', id], queryFn: () => request<SyncState>(`/onboardings/${id}/sync`) })
 export const useProvisionStatus = (id: string) => useQuery({ queryKey: ['provision', id], queryFn: () => request<ProvisionStatus>(`/onboardings/${id}/provision`) })
+export const useOnboardingDocument = (id: string) =>
+  useQuery({ queryKey: ['document', id], queryFn: () => request<OnboardingDocument>(`/onboardings/${id}/document`) })
 export const useLinks = (id: string) => useQuery({ queryKey: k.links(id), queryFn: () => request<LinkInfo[]>(`/onboardings/${id}/links`) })
 
 // ------------------------------------------------------------------ writes
@@ -54,7 +57,14 @@ export const useImportYaml = () =>
 export const fetchTemplateYaml = (id: string) => request<string>(`/templates/${id}/export`, { text: true })
 
 export const useCreateOnboarding = () =>
-  useWrite((b: { client_id: string; template_id: string; title?: string }) => request<OnboardingDetail>('/onboardings', { body: b }), () => [k.onboardings])
+  useWrite((b: { client_id: string; template_id: string; title?: string; sections?: SectionDoc[]; steps?: StepDoc[] }) => request<OnboardingDetail>('/onboardings', { body: b }), () => [k.onboardings])
+export const useSaveOnboardingSteps = (id: string) =>
+  useWrite((b: { sections: SectionDoc[]; steps: StepDoc[] }) => request<OnboardingDetail & OnboardingDocument>(`/onboardings/${id}/document`, { method: 'PUT', body: b }),
+    () => [k.onboarding(id), k.onboardings, ['document', id]])
+
+export const useSaveTemplate = () =>
+  useWrite((doc: TemplateDoc) => request<TemplateDetail>('/templates', { body: doc }), (_a, r) => [k.templates, ['template', r.id]])
+export const checkTemplate = (doc: TemplateDoc) => request<TemplateCheck>('/templates/validate', { body: doc })
 
 type Action = 'pause' | 'resume' | 'archive'
 export const useOnboardingAction = (id: string) =>

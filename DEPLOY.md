@@ -71,7 +71,7 @@ Off until Voicent-App has an endpoint that accepts it. The contract that endpoin
 
 1. Generate a secret: `python -c "import secrets; print(secrets.token_urlsafe(48))"`. Set it as `VOICENT_PROVISION_SECRET` here and on the Voicent-App service.
 2. Set `VOICENT_PROVISION_URL` to the Voicent-App endpoint (`https://`).
-3. Add `on_complete: provision_voicent_workspace` to the templates that should set up a workspace (for example the MSP one). Only onboardings created from that template version on are affected; live ones keep their own copy.
+3. Choose which templates set up a workspace with `on_complete: provision_voicent_workspace`. The MSP preset already has it, but only an org that installs the presets after this change gets it that way. An org that already has the MSP template keeps its old copy: export it from Templates, add the line, and import it again, which saves a new version and keeps your own edits. Only onboardings created from that version on are affected; live ones keep their own copy.
 4. Check what would go: open a finished onboarding's `GET /api/onboardings/<id>/provision/payload`, or run `python -m app.cli provision --dry-run`.
 
 Finished onboardings that were waiting while it was off are sent once it is on. Each onboarding page has a "Voicent workspace" panel that shows whether the request went through, and a button to send it again.

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router'
 import { fetchTemplateYaml, useImportYaml, useInstallPresets, useTemplates } from '../api/admin'
 import { ApiError } from '../api/http'
 import type { YamlImportResult } from '../api/types'
@@ -37,16 +38,23 @@ export default function TemplatesPage() {
     <div className="stack">
       <div className="row between wrap">
         <h1>Templates</h1>
-        <button className="btn" disabled={presets.isPending} onClick={() => presets.mutate()}>Install the preset templates</button>
+        <div className="row wrap">
+          <Link className="btn btn-primary" to="/templates/new">Build a template</Link>
+          <button className="btn" disabled={presets.isPending} onClick={() => presets.mutate()}>Install the preset templates</button>
+        </div>
       </div>
       {presets.data && <Banner kind="ok">{presets.data.added.length ? `Added: ${presets.data.added.join(', ')}.` : 'All the presets are already here.'}</Banner>}
       {templates.isError && <LoadError error={templates.error} what="templates" />}
-      {templates.isSuccess && templates.data.length === 0 && <Banner>No templates yet. Install the presets, or paste your own YAML below.</Banner>}
+      {templates.isSuccess && templates.data.length === 0 && <Banner>No templates yet. Build one, install the presets, or paste your own YAML below.</Banner>}
       <ul className="cards">
         {templates.data?.map((t) => (
           <li key={t.id} className="card row between wrap">
             <div><strong>{t.name}</strong> <span className="help">· {t.slug} · version {t.current_version}</span></div>
-            <button className="btn btn-small" onClick={() => void download(t.id, t.slug)}>Download YAML</button>
+            <div className="row wrap">
+              <Link className="btn btn-small" to={`/templates/${t.id}/edit`} aria-label={`Edit ${t.name}`}>Edit</Link>
+              <Link className="btn btn-small" to={`/templates/new?from=${t.id}`} aria-label={`Copy ${t.name}`}>Copy</Link>
+              <button className="btn btn-small" onClick={() => void download(t.id, t.slug)}>Download YAML</button>
+            </div>
           </li>
         ))}
       </ul>
