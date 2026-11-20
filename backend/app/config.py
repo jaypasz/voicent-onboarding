@@ -73,6 +73,10 @@ class Settings:
     # Ask Voicent-App for a workspace when an onboarding whose template says so is finished: a signed webhook. Off until both are set.
     voicent_provision_url: str = ""
     voicent_provision_secret: str = ""
+    # Tenancy from Voicent-App: read who a signed-in person is (tenant, role, superuser) and the tenant's name, type and
+    # brand from Voicent-App's Supabase project. Read only. Off until both are set; orgs and members made by seed still work.
+    voicent_supabase_url: str = ""
+    voicent_supabase_service_key: str = ""
     # Background jobs (reminders and AIOS sync) run inside the web process every few minutes. Off unless from_env turns
     # them on, so tests and scripts never start a thread by accident. Run one instance of the service.
     jobs_enabled: bool = False
@@ -112,6 +116,10 @@ class Settings:
             out.append("Voicent provisioning: VOICENT_PROVISION_URL must be an https:// URL. Provisioning is off until it is.")
         if self.voicent_provision_secret and len(self.voicent_provision_secret) < 32:
             out.append("Voicent provisioning: VOICENT_PROVISION_SECRET is shorter than 32 characters. Provisioning is off until it is longer.")
+        if bool(self.voicent_supabase_url) != bool(self.voicent_supabase_service_key):
+            out.append("Voicent tenancy: set both VOICENT_SUPABASE_URL and VOICENT_SUPABASE_SERVICE_KEY. Tenancy from Voicent-App is off until then.")
+        if self.voicent_supabase_url and not self.voicent_supabase_url.startswith("https://"):
+            out.append("Voicent tenancy: VOICENT_SUPABASE_URL must be an https:// URL. Tenancy from Voicent-App is off until it is.")
         if not valid_timezone(self.default_timezone):
             out.append(f"DEFAULT_TIMEZONE '{self.default_timezone}' isn't a time zone name. Using America/New_York.")
         if self.aios_api_url and not self.aios_api_url.startswith("https://"):
@@ -151,6 +159,10 @@ class Settings:
         return bool(self.aios_api_url.startswith("https://") and self.aios_service_token)
 
     @property
+    def tenancy_enabled(self) -> bool:
+        return bool(self.voicent_supabase_url.startswith("https://") and self.voicent_supabase_service_key)
+
+    @property
     def provisioning_enabled(self) -> bool:
         return bool(self.voicent_provision_url.startswith("https://") and len(self.voicent_provision_secret) >= 32)
 
@@ -185,6 +197,8 @@ class Settings:
             aios_service_token=e("AIOS_SERVICE_TOKEN", "").strip(),
             voicent_provision_url=e("VOICENT_PROVISION_URL", "").strip(),
             voicent_provision_secret=e("VOICENT_PROVISION_SECRET", "").strip(),
+            voicent_supabase_url=e("VOICENT_SUPABASE_URL", "").strip().rstrip("/"),
+            voicent_supabase_service_key=e("VOICENT_SUPABASE_SERVICE_KEY", "").strip(),
             jobs_enabled=e("JOBS_ENABLED", "1") != "0",
             jobs_interval_minutes=int(e("JOBS_INTERVAL_MINUTES", "15")),
             nudge_max=int(e("NUDGE_MAX", "3")),

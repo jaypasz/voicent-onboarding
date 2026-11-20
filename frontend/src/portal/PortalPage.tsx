@@ -7,6 +7,8 @@ import { ProgressBar } from '../components/ProgressBar'
 import ChecklistLayout from './ChecklistLayout'
 import FocusLayout from './FocusLayout'
 import { PortalSessionProvider, usePortal } from './session'
+import { BrandName } from './brand'
+import { brandStyle, safeLogo } from '../lib/brand'
 
 export default function PortalPage() {
   const { token = '' } = useParams()
@@ -31,7 +33,7 @@ function PortalInner({ linkToken }: { linkToken: string }) {
   const q = useQuery({ queryKey: ['portal', linkToken], queryFn: () => call<PortalView>('/portal/onboarding'), enabled: status === 'ready', retry: false })
 
   useEffect(() => {
-    document.title = q.data ? `${q.data.title}` : 'Your onboarding'
+    document.title = q.data ? `${q.data.title}${q.data.brand?.name ? ` · ${q.data.brand.name}` : ''}` : 'Your onboarding'
   }, [q.data])
 
   if (status === 'unavailable') {
@@ -52,18 +54,29 @@ function PortalInner({ linkToken }: { linkToken: string }) {
   }
   if (status === 'loading' || q.isPending || !q.data) return <Message title="Loading your onboarding…" />
 
-  const view = q.data
-  const onChanged = () => q.refetch()
+  return <PortalScreen view={q.data} onChanged={() => q.refetch()} />
+}
+
+/** What a client sees. The admin's client preview renders this same screen with a read-only session. */
+export function PortalScreen({ view, onChanged, preview = false }: { view: PortalView; onChanged: () => Promise<unknown>; preview?: boolean }) {
+  const logo = safeLogo(view.brand?.logo_url)
   return (
-    <main className={`portal portal-${view.layout}`}>
-      <header className="portal-head">
-        <div className="eyebrow">{view.client_name}</div>
-        <h1>{view.title}</h1>
-        <ProgressBar progress={view.progress} label="Your progress" />
-      </header>
-      {view.status === 'paused' && <Banner kind="warn">This onboarding is paused. You can read everything, but changes are switched off until we resume it.</Banner>}
-      {view.status === 'completed' && <Banner kind="ok">This onboarding is complete. Thank you!</Banner>}
-      {view.layout === 'focus' ? <FocusLayout view={view} onChanged={onChanged} /> : <ChecklistLayout view={view} onChanged={onChanged} />}
-    </main>
+    <BrandName.Provider value={view.brand?.name || ''}>
+      <main className={`portal portal-${view.layout}${preview ? ' is-preview' : ''}`} style={brandStyle(view.brand)}>
+        <header className="portal-head">
+          {(logo || view.brand?.name) && (
+            <div className="portal-brand">
+              {logo ? <img src={logo} alt={view.brand?.name || ''} className="portal-logo" referrerPolicy="no-referrer" /> : <strong>{view.brand?.name}</strong>}
+            </div>
+          )}
+          <div className="eyebrow">{view.client_name}</div>
+          <h1>{view.title}</h1>
+          <ProgressBar progress={view.progress} label="Your progress" />
+        </header>
+        {view.status === 'paused' && <Banner kind="warn">This onboarding is paused. You can read everything, but changes are switched off until we resume it.</Banner>}
+        {view.status === 'completed' && <Banner kind="ok">This onboarding is complete. Thank you!</Banner>}
+        {view.layout === 'focus' ? <FocusLayout view={view} onChanged={onChanged} /> : <ChecklistLayout view={view} onChanged={onChanged} />}
+      </main>
+    </BrandName.Provider>
   )
 }

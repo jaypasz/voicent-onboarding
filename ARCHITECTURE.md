@@ -65,9 +65,9 @@ A timer thread in the web process runs `jobs.run_once` every `JOBS_INTERVAL_MINU
 
 ## Voicent-App provisioning (Step 11)
 
-When an onboarding is finished and its own template snapshot says `on_complete: provision_voicent_workspace`, this service sends Voicent-App one signed webhook asking it to set up the client's workspace. It is off until `VOICENT_PROVISION_URL` and `VOICENT_PROVISION_SECRET` are set (see DEPLOY.md). The code is `backend/app/provision.py`. **The receiving endpoint in Voicent-App is separate work.** What follows is the contract it must meet.
+When a **paying** client's onboarding is finished, and its own template snapshot says `on_complete: provision_voicent_workspace`, this service sends Voicent-App one signed webhook asking it to set up the client's workspace. Both must be true: finishing the onboarding and being marked as a paying customer (on the client page), in either order. A prospect who finishes but never pays is a lead and never reaches Voicent-App; leads and nurturing live in third-party tools. It is off until `VOICENT_PROVISION_URL` and `VOICENT_PROVISION_SECRET` are set (see DEPLOY.md). The code is `backend/app/provision.py`. **The receiving endpoint in Voicent-App is separate work.** What follows is the contract it must meet.
 
-**How this side sends it.** Finishing the last step queues a delivery in the database; it goes out after the response (and from the timer if that didn't happen). One conditional `UPDATE` claims it, so it goes out once even if two runs overlap. A timeout, a `408`, a `429` or a `5xx` is retried by the timer after 5 minutes, 30 minutes, 2 hours, 6 hours and 24 hours, always with the same `delivery_id`. Then it is marked failed. Any other `4xx` is not retried: it is marked failed at once and waits for Jay. Redirects are not followed. Jay can send it again from the onboarding page, which makes a new `delivery_id` for the same onboarding (for example after the client's answers were corrected). Finishing, reopening and finishing again does not send a second time by itself.
+**How this side sends it.** Finishing the last step of a paying client's onboarding, or marking a client with a finished onboarding as paying, queues a delivery in the database. Marking the client as not paying cancels a delivery still waiting (one already accepted stays); it goes out after the response (and from the timer if that didn't happen). One conditional `UPDATE` claims it, so it goes out once even if two runs overlap. A timeout, a `408`, a `429` or a `5xx` is retried by the timer after 5 minutes, 30 minutes, 2 hours, 6 hours and 24 hours, always with the same `delivery_id`. Then it is marked failed. Any other `4xx` is not retried: it is marked failed at once and waits for Jay. Redirects are not followed. Jay can send it again from the onboarding page, which makes a new `delivery_id` for the same onboarding (for example after the client's answers were corrected). Finishing, reopening and finishing again does not send a second time by itself.
 
 ### Request
 
@@ -76,25 +76,26 @@ When an onboarding is finished and its own template snapshot says `on_complete: 
 | Header | Value |
 |---|---|
 | `Content-Type` | `application/json` |
-| `X-Voicent-Event` | `onboarding.completed` |
+| `X-Voicent-Event` | `workspace.requested` |
 | `X-Voicent-Delivery` | the `delivery_id` (a UUID). The same on every retry of one delivery |
 | `X-Voicent-Timestamp` | Unix seconds when this attempt was signed |
 | `X-Voicent-Signature` | `v1=` + lowercase hex HMAC-SHA256 of `<timestamp>.<raw body bytes>`, keyed with the shared secret |
 
 ```json
 {
-  "event": "onboarding.completed",
-  "schema_version": 1,
+  "event": "workspace.requested",
+  "schema_version": 2,
   "delivery_id": "6f1c…",
   "sent_at": "2026-11-19T15:04:05Z",
   "source": "voicent-onboarding",
-  "org": {"id": "…", "slug": "voicent", "name": "Voicent"},
+  "tenant": {"voicent_tenant_id": "0b9e…", "account_type": "reseller"},
+  "org": {"id": "…", "slug": "acme-agency", "name": "Acme Agency"},
   "onboarding": {
     "id": "…", "title": "MSP onboarding: Acme IT", "url": "https://<this service>/onboardings/<id>",
     "template": {"slug": "msp", "version": 3, "name": "MSP onboarding"},
     "started_at": "2026-11-01T14:00:00Z", "completed_at": "2026-11-19T15:04:00Z"
   },
-  "client": {"id": "…", "name": "Acme IT", "kind": "msp", "timezone": "America/Chicago"},
+  "client": {"id": "…", "name": "Acme IT", "kind": "msp", "timezone": "America/Chicago", "paying_since": "2026-11-18T10:00:00Z"},
   "contacts": [
     {"id": "…", "name": "Pat Owner", "email": "pat@acme.example", "phone": "+15551234567", "role": "owner",
      "sms_consent": true, "sms_consent_at": "2026-11-01T14:00:00Z"}
@@ -105,17 +106,19 @@ When an onboarding is finished and its own template snapshot says `on_complete: 
       "services": {"label": "Services", "type": "multiselect", "value": ["Managed IT", "VoIP"]}
     }
   },
-  "integrations": [
-    {"step_key": "phone_system", "provider": "ringcentral", "label": "RingCentral", "access_mode": "delegated",
-     "status": "connected", "account_label": "acme-main"}
+  "files": [
+    {"step_key": "brand_assets", "step_title": "Your logo", "id": "…", "name": "logo.png", "content_type": "image/png", "size": 48213,
+     "url": "https://<storage>/…signed…", "url_expires_at": "2026-11-19T16:04:05Z"}
   ]
 }
 ```
 
+- `tenant` says which Voicent tenant the workspace belongs under. For a reseller (`account_type: "reseller"`), create the workspace inside that reseller's tenant, so the client sees the reseller's brand. `voicent_tenant_id` is `null` for an org that isn't linked to a Voicent tenant (one made by `seed`); decide how to place those (for example under the platform's own tenant) or refuse them with a `4xx`.
 - `answers` holds the latest answer to each client **form** step that wasn't skipped, keyed by step key then field key. `type` is the form field type (`text`, `textarea`, `select`, `multiselect`, `phone`, `email`, `url`, `date`, `checkbox`); `value` is a string, a list of strings (multiselect) or a boolean (checkbox). Unanswered optional fields are absent. Text has been through `redact()` twice (on write and on the way out).
-- `integrations` has one entry per client **connect** step. `status` is `connected`, `pending` (the client asked for help), `not_started` or `skipped`. `account_label` is what the client typed to say which account; it is never a token.
-- Missing values are `null` (`email`, `phone`, `role`, `sms_consent_at`, `onboarding.url` when `APP_URL` is unset, `started_at`).
-- **Never in the payload:** uploaded files or their names, comments, approval decisions or notes, booked-call details, internal steps and their checklists, magic link tokens, or any credential. The shared secret only signs; it is never sent.
+- `files` lists the files in the client's accepted answer to each **upload** step that wasn't skipped (not earlier attempts they replaced). `url` is a signed download link that works until `url_expires_at` (one hour). **Copy each file into your own storage while the link works**; the link is not a place to keep it. Every attempt (retries and "send again" included) makes new links. `url` and `url_expires_at` are `null` when uploads are switched off here. If a link can't be made, this side doesn't send and tries again later, as for an outage.
+- Missing values are `null` (`email`, `phone`, `role`, `sms_consent_at`, `onboarding.url` when `APP_URL` is unset, `started_at`, `content_type`, `size`).
+- **Only text answers and files go out.** Never in the payload: file contents (only links), comments, approval decisions or notes, booked-call details, connected-account details, internal steps and their checklists, magic link tokens, or any credential. The shared secret only signs; it is never sent. This side never asks Voicent-App to set up agents or workflows.
+- **What changed in version 2:** the event is `workspace.requested` (was `onboarding.completed`) and it is only sent for paying clients; `tenant`, `client.paying_since` and `files` are new; `integrations` is gone. Nothing was ever sent under version 1.
 - `schema_version` goes up only for a change a receiver must handle. New optional keys can appear without a bump, so ignore keys you don't know.
 
 ### What the receiver must do
@@ -136,7 +139,7 @@ When an onboarding is finished and its own template snapshot says `on_complete: 
        return hmac.compare_digest(f"v1={mac}", signature or "")
    ```
 
-2. Be idempotent. A repeated `delivery_id` must return the same answer without doing the work again. A new `delivery_id` for an `onboarding.id` it has already seen is an update ("send again"): apply the newer answers to the same workspace, never create a second one.
+2. Be idempotent. A repeated `delivery_id` must return the same answer without doing the work again. A new `delivery_id` for an `onboarding.id` it has already seen is an update ("send again"): apply the newer answers and files to the same workspace, never create a second one.
 3. Answer within 10 seconds. If setting up the workspace takes longer, store the request and return `202`, then do the work.
 4. Reply `2xx` when it has the request, with an optional JSON body `{"workspace_id": "<id>", "status": "created" | "updated" | "queued"}`. `workspace_id` (1 to 120 of `A–Z a–z 0–9 _ . : -`) is shown on the onboarding page; anything else in it is ignored.
 5. Reply `4xx` (not `408` or `429`) only when sending the same thing again can never work: a bad signature, a payload it can't use, an unknown template. That stops the retries and shows Jay a failure. Use `5xx` or `429` for anything temporary.
@@ -147,4 +150,20 @@ Nothing the receiver says in a response body is shown or stored here, apart from
 ## Integrations
 
 - **AIOS:** one project per onboarding and a task per step through the AIOS REST API with a dedicated service token. De-duplicated by the stored task ID and the task `link`. A sync failure never blocks the client.
-- **Voicent-App:** the signed webhook above. Off by default; the receiving endpoint is a separate piece of work in that repo.
+- **Voicent-App:** the signed webhook above, for paying clients only. Off by default; the receiving endpoint is a separate piece of work in that repo.
+- **Voicent-App tenancy (read only):** who a signed-in person is and their tenant's name, type and brand, read from Voicent-App's Supabase. See "Tenancy and branding" below.
+
+## Tenancy and branding
+
+This app follows Voicent-App's tenancy. Voicent-App has a platform (its superusers), tenants that are either a **direct** customer or a **reseller** (a white-label agency whose clients are its own), and workspaces under a tenant. Here:
+
+- **One org per Voicent tenant** (`orgs.voicent_tenant_id`, `orgs.account_type`). A reseller's clients are that org's clients, and nothing crosses between orgs (every row has `org_id`, as before). The org is made the first time one of the tenant's people signs in.
+- **One login.** People sign in with their Voicent-App account (the same Supabase Auth project; DEPLOY.md). On a request, `tenancy.access_for` asks Voicent-App's directory (`voicent_directory.py`, read only: `users(auth_id, tenant_id, role, is_superuser)` and `tenants(id, slug, company_name, account_type, settings)`), cached for 5 minutes. It copies the membership and role into `org_members` with `source = "voicent"`, and removes that copy when Voicent-App no longer lists the person in that tenant. Memberships made by `seed` (`source = "local"`) are never touched. If Voicent-App can't be reached, the last copy is used; a person never seen before waits.
+- **Roles** are Voicent-App's: `admin`, `manager`, `member`, `viewer` (unknown roles become `viewer`). A viewer can read but not change anything; only an admin changes the org's brand and senders. A Voicent **superuser** may work in any org by sending `X-Org-Id`, as an admin there.
+- **Brand.** Logo and colours come from the tenant's `settings.branding` in Voicent-App (copied on each fresh lookup; set here only for an org with no tenant). This app adds what Voicent-App doesn't have: the name clients see, the name emails come from, a reply-to address and an SMS number. Every brand field is checked wherever it came from (`branding.clean`: an https logo, `#rrggbb` colours). The portal, the admin app, reminder emails and texts all use the org's brand; **a reseller's clients never see "Voicent"** (with no name set, the reseller's own name is used). Emails keep our verified sending address and change only the name shown, so a reseller doesn't need their own domain.
+
+## The team and notifications
+
+- **Who is on the team.** For an org linked to a Voicent tenant, the whole tenant (`users` where `tenant_id` matches: `auth_id`, `email`, `role`) is copied over when the Team page is opened (cached 5 minutes), so anyone can be given an onboarding or a step before they first sign in. People and roles are managed in Voicent-App only. An org with no tenant invites by email; the invite is accepted the first time someone signs in with that address (Supabase only issues a session for a confirmed address).
+- **Who looks after what.** Each onboarding has an owner (the team member who made it, until changed) and each step can have a team member who follows it up. This is separate from the client contact a step is for, and it is never shown to clients or synced out.
+- **What they are told.** A notification is a row for one member, in our own words (who did what, where), never what a client typed. Events: being made owner or follower (not for your own action); a client answering a step (to its follower, else the owner); an onboarding finishing, or the client going quiet after every reminder (to the owner). Emails go to people who want them, through the same email service as reminders, under the org's name, linking to the onboarding page (which needs a login). One conditional `UPDATE` claims each email, so it goes once; the timer is the backstop; anything older than a day is never emailed late.

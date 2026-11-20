@@ -6,7 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from .. import aios_sync, magic_link, models as m, provision, services
+from .. import aios_sync, magic_link, models as m, notifications, provision, services
 from .. import nudges as reminders
 from ..deps import Actor, Auth, Db, Org, Session
 from ..errors import NotFound
@@ -22,14 +22,18 @@ def _step(db: Session, org: str, onboarding_id: str, key: str) -> dict:
 
 
 @router.get("")
-def list_onboardings(status: str | None = None, client_id: str | None = None, db: Session = Db, org: str = Org):
-    return [onboarding_summary(o) for o in services.list_onboardings(db, org, status, client_id)]
+def list_onboardings(request: Request, status: str | None = None, client_id: str | None = None, mine: bool = False, db: Session = Db, org: str = Org):
+    """`mine=1`: only the onboardings you look after."""
+    owner = (request.state.member_id or "no-member") if mine else None
+    return [onboarding_summary(o) for o in services.list_onboardings(db, org, status, client_id, owner)]
 
 
 @router.post("", status_code=201)
-def create(body: OnboardingIn, db: Session = Db, org: str = Org):
+def create(body: OnboardingIn, request: Request, db: Session = Db, org: str = Org):
+    """Whoever makes it looks after it, until someone else is chosen."""
     return onboarding_detail(services.create_onboarding(
-        db, org, client_id=body.client_id, template_id=body.template_id, title=body.title, version=body.version, sections=body.sections, steps=body.steps))
+        db, org, client_id=body.client_id, template_id=body.template_id, title=body.title, version=body.version, sections=body.sections, steps=body.steps,
+        owner_member_id=request.state.member_id))
 
 
 @router.get("/{onboarding_id}")
@@ -52,6 +56,20 @@ def put_document(onboarding_id: str, body: OnboardingStepsIn, db: Session = Db, 
     """Replace a draft's sections and steps. Steps that already hold answers, files or comments can't be removed or change type."""
     ob = services.update_onboarding_steps(db, org, onboarding_id, sections=body.sections, steps=body.steps)
     return onboarding_detail(ob) | _document(ob)
+
+
+@router.get("/{onboarding_id}/preview")
+def preview(onboarding_id: str, request: Request, contact_id: str | None = None, db: Session = Db, org: str = Org):
+    """The client's view of this onboarding, read-only, for one of the client's contacts (or the first one)."""
+    from .. import portal
+
+    ob = services.get_onboarding(db, org, onboarding_id)
+    contacts = list(db.scalars(select(m.Contact).where(m.Contact.client_id == ob.client_id, m.Contact.org_id == org).order_by(m.Contact.created_at)))
+    contact = next((c for c in contacts if c.id == contact_id), None) if contact_id else (contacts[0] if contacts else None)
+    if contact_id and contact is None:
+        raise NotFound("Contact not found.")
+    return portal.preview_view(db, request.app.state.settings, ob, contact) | {
+        "contacts": [{"id": c.id, "name": c.name, "role": c.role} for c in contacts]}
 
 
 class LinkIn(BaseModel):
@@ -149,6 +167,7 @@ def submit(onboarding_id: str, key: str, body: StepAnswerIn, request: Request, b
     """Jay records an answer for a step (on a call, or an internal task)."""
     aios_sync.kick(request, background, org, onboarding_id)
     provision.kick(request, background, org, onboarding_id)
+    notifications.kick(request, background)
     services.submit_step(db, org, onboarding_id, key, body.data, submitted_by=f"admin:{actor.label}", actor_kind="admin")
     return _step(db, org, onboarding_id, key)
 
@@ -157,6 +176,7 @@ def submit(onboarding_id: str, key: str, body: StepAnswerIn, request: Request, b
 def complete(onboarding_id: str, key: str, request: Request, background: BackgroundTasks, db: Session = Db, org: str = Org):
     aios_sync.kick(request, background, org, onboarding_id)
     provision.kick(request, background, org, onboarding_id)
+    notifications.kick(request, background)
     services.complete_step(db, org, onboarding_id, key)
     return _step(db, org, onboarding_id, key)
 
@@ -165,6 +185,7 @@ def complete(onboarding_id: str, key: str, request: Request, background: Backgro
 def skip(onboarding_id: str, key: str, request: Request, background: BackgroundTasks, db: Session = Db, org: str = Org):
     aios_sync.kick(request, background, org, onboarding_id)
     provision.kick(request, background, org, onboarding_id)
+    notifications.kick(request, background)
     services.skip_step(db, org, onboarding_id, key)
     return _step(db, org, onboarding_id, key)
 
@@ -226,7 +247,8 @@ def provision_status(onboarding_id: str, request: Request, db: Session = Db, org
 
 @router.get("/{onboarding_id}/provision/payload")
 def provision_payload(onboarding_id: str, request: Request, db: Session = Db, org: str = Org):
-    """Exactly what Voicent-App would receive for this onboarding now (the body; the signature headers are added when sending)."""
+    """Exactly what Voicent-App would receive for this onboarding now (the body; the signature headers are added when sending).
+    File links are left out (url is null): a preview must not hand out working download links."""
     st = request.app.state
     ob = services.get_onboarding(db, org, onboarding_id)
     return provision.build_payload(db, st.settings, ob, st.clock())
@@ -241,6 +263,6 @@ def provision_now(onboarding_id: str, request: Request, db: Session = Db, org: s
     else:
         services.request_provisioning(db, org, onboarding_id, st.clock())
         db.commit()  # the delivery reads in its own session
-        r = provision.deliver(st.sessionmaker, st.settings, org, onboarding_id, st.provisioner, now=st.clock(), manual=True)
+        r = provision.deliver(st.sessionmaker, st.settings, org, onboarding_id, st.provisioner, now=st.clock(), manual=True, storage=st.storage)
         db.expire_all()
     return {"result": asdict(r)} | provision.status_for(db, st.settings, services.get_onboarding(db, org, onboarding_id))

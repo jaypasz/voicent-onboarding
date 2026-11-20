@@ -1,90 +1,37 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router'
 import {
-  useAdminComment, useAnswerStep, useClients, useExtendLink, useIssueLink, useLinks, useOnboarding, useOnboardingAction, useRevokeLink, useSend, useStepAction,
+  useAdminComment, useAnswerStep, useSetOwner, useSetStepFollower, useTeam, useClients, useOnboarding, useOnboardingAction, useSend, useStepAction,
 } from '../api/admin'
 import { ApiError } from '../api/http'
-import type { AdminStep, Contact, LinkInfo } from '../api/types'
+import type { AdminStep, Contact, LinkInfo, TeamMember } from '../api/types'
+import { memberLabel } from '../lib/team'
 import { Banner } from '../components/Banner'
 import { LoadError } from '../components/LoadError'
-import { CopyButton } from '../components/CopyButton'
 import { ProgressBar } from '../components/ProgressBar'
-import { OnboardingBadge, StepBadge } from '../components/StatusBadge'
+import { StepBadge } from '../components/StatusBadge'
 import { dueLabel, formatDateTime } from '../lib/format'
 import StepResponse from './StepResponse'
-import AiosPanel from './AiosPanel'
-import RemindersPanel from './RemindersPanel'
-import VoicentPanel from './VoicentPanel'
+import { IssuedLinks } from './LinksPanel'
 
 function errText(e: unknown): string {
   return e instanceof ApiError ? [e.message, ...e.problems].join(' ') : 'That did not work.'
 }
 
-function IssuedLinks({ links }: { links: LinkInfo[] }) {
+function TeamSelect({ label, value, members, onChange, disabled }: { label: string; value: string | null | undefined; members: TeamMember[]; onChange: (id: string | null) => void; disabled?: boolean }) {
   return (
-    <Banner kind="warn">
-      <strong>Copy these links now. They can't be shown again.</strong> Each one is for one person; anyone with a link can see and answer this onboarding as that person.
-      <ul className="issued">
-        {links.map((l) => (
-          <li key={l.id}>
-            <div>{l.contact_name || 'Link'}</div>
-            <input readOnly value={l.url} aria-label={`Link for ${l.contact_name}`} onFocus={(e) => e.currentTarget.select()} />
-            <CopyButton text={l.url ?? ''} />
-          </li>
-        ))}
-      </ul>
-    </Banner>
+    <label className="field-group"><span>{label}</span>
+      <select value={value ?? ''} disabled={disabled} onChange={(e) => onChange(e.target.value || null)}>
+        <option value="">Nobody</option>
+        {members.map((m) => <option key={m.id} value={m.id}>{memberLabel(m)}{m.is_you ? ' (you)' : ''}</option>)}
+      </select>
+    </label>
   )
 }
 
-function LinksPanel({ id, contacts, issued, onIssued }: { id: string; contacts: Contact[]; issued: LinkInfo[]; onIssued: (l: LinkInfo[]) => void }) {
-  const links = useLinks(id)
-  const issue = useIssueLink(id)
-  const revoke = useRevokeLink(id)
-  const extend = useExtendLink(id)
-  const [contactId, setContactId] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const run = async (fn: () => Promise<unknown>) => { setError(null); try { await fn() } catch (e) { setError(errText(e)) } }
-
-  return (
-    <section className="stack" aria-labelledby="links-h">
-      <h2 id="links-h">Client links</h2>
-      {issued.length > 0 && <IssuedLinks links={issued} />}
-      {error && <Banner kind="error">{error}</Banner>}
-      {links.data?.length === 0 && <p className="help">No links yet. They are made when you send the onboarding, or you can make one below.</p>}
-      <ul className="cards">
-        {links.data?.map((l) => (
-          <li key={l.id} className="card row between wrap">
-            <div>
-              <strong>{l.contact_name}</strong>{' '}
-              <span className="badge">{l.revoked_at ? '✕ Revoked' : l.usable ? '✓ Works' : '⚠ Expired'}</span>
-              <div className="help">Expires {formatDateTime(l.expires_at)}{l.last_used_at ? ` · last opened ${formatDateTime(l.last_used_at)}` : ' · not opened yet'}</div>
-            </div>
-            {!l.revoked_at && (
-              <div className="row">
-                <button className="btn btn-small" onClick={() => run(() => extend.mutateAsync({ linkId: l.id, days: 30 }))}>Extend 30 days</button>
-                <button className="btn btn-small" onClick={() => window.confirm(`Revoke ${l.contact_name}'s link? It stops working at once.`) && run(() => revoke.mutateAsync(l.id))}>Revoke</button>
-              </div>
-            )}
-          </li>
-        ))}
-      </ul>
-      {contacts.length > 0 && (
-        <div className="row wrap">
-          <label className="field-group"><span>Make another link for</span>
-            <select value={contactId} onChange={(e) => setContactId(e.target.value)}>
-              <option value="">Choose a contact…</option>
-              {contacts.map((c) => <option key={c.id} value={c.id}>{c.name}{c.role ? ` (${c.role})` : ''}</option>)}
-            </select>
-          </label>
-          <button className="btn" disabled={!contactId || issue.isPending} onClick={() => run(async () => { onIssued([...issued, { ...(await issue.mutateAsync(contactId)), contact_name: contacts.find((c) => c.id === contactId)?.name ?? '' }]); setContactId('') })}>Make link</button>
-        </div>
-      )}
-    </section>
-  )
-}
-
-function AdminStepCard({ id, step, contact }: { id: string; step: AdminStep; contact?: Contact }) {
+function AdminStepCard({ id, step, contact, members }: { id: string; step: AdminStep; contact?: Contact; members: TeamMember[] }) {
+  const follower = useSetStepFollower(id)
+  const ours = members.find((m) => m.id === step.team_assignee_id)
   const action = useStepAction(id)
   const answer = useAnswerStep(id)
   const comment = useAdminComment(id)
@@ -111,6 +58,7 @@ function AdminStepCard({ id, step, contact }: { id: string; step: AdminStep; con
           <span className="due">{step.type.replace('_', ' ')}</span>
           {step.visibility === 'internal' && <span className="badge">🔒 Internal. Never shown to the client</span>}
           {contact && <span className="due">For {contact.name}</span>}
+          {ours && <span className="due">Ours: {memberLabel(ours)}</span>}
           {due && <span className={due.overdue ? 'due due-overdue' : 'due'}>{due.overdue ? '⚠ ' : ''}{due.text}</span>}
         </span>
         <span aria-hidden="true" className="chev">{open ? '▾' : '▸'}</span>
@@ -118,6 +66,10 @@ function AdminStepCard({ id, step, contact }: { id: string; step: AdminStep; con
       {open && (
         <div className="step-panel">
           {error && <Banner kind="error">{error}</Banner>}
+          {members.length > 0 && (
+            <TeamSelect label="Followed up by (our side)" value={step.team_assignee_id} members={members} disabled={follower.isPending}
+              onChange={(member_id) => void run(() => follower.mutateAsync({ key: step.key, member_id }))} />
+          )}
           {step.type === 'internal_task' && (step.config.checklist ?? []).length > 0 && (
             <ul>{(step.config.checklist as string[]).map((c) => <li key={c}>{c}</li>)}</ul>
           )}
@@ -165,6 +117,8 @@ export default function OnboardingDetail() {
   const clients = useClients()
   const act = useOnboardingAction(id)
   const send = useSend(id)
+  const team = useTeam()
+  const owner = useSetOwner(id)
   const [issued, setIssued] = useState<LinkInfo[]>([])
   const [error, setError] = useState<string | null>(null)
 
@@ -173,6 +127,7 @@ export default function OnboardingDetail() {
   const o = ob.data
   const client = clients.data?.find((c) => c.id === o.client_id)
   const contacts = client?.contacts ?? []
+  const members = team.data?.members ?? []
   const run = async (fn: () => Promise<unknown>) => { setError(null); try { await fn() } catch (e) { setError(errText(e)) } }
 
   const sections: { key: string; steps: AdminStep[] }[] = []
@@ -185,15 +140,14 @@ export default function OnboardingDetail() {
 
   return (
     <div className="stack">
-      <p><Link to="/">← Onboardings</Link></p>
-      <div className="row between wrap">
-        <div>
-          <h1>{o.title}</h1>
-          <p className="help">{client ? <Link to={`/clients/${client.id}`}>{client.name}</Link> : null} · {o.layout} layout</p>
-        </div>
-        <OnboardingBadge status={o.status} />
-      </div>
       <ProgressBar progress={o.progress} />
+      {members.length > 0 && (
+        <div className="owner-row">
+          <TeamSelect label="Looked after by" value={o.owner_member_id} members={members} disabled={owner.isPending}
+            onChange={(member_id) => void run(() => owner.mutateAsync(member_id))} />
+          <p className="help">They're told when it finishes, when the client goes quiet, and when the client answers a step nobody else follows up.</p>
+        </div>
+      )}
       {error && <Banner kind="error">{error}</Banner>}
       <div className="row wrap">
         {o.status === 'draft' && (
@@ -204,8 +158,9 @@ export default function OnboardingDetail() {
         {o.status === 'active' && <button className="btn" onClick={() => run(() => act.mutateAsync('pause'))}>Pause</button>}
         {o.status === 'paused' && <button className="btn btn-primary" onClick={() => run(() => act.mutateAsync('resume'))}>Resume</button>}
         {o.status !== 'archived' && <button className="btn" onClick={() => window.confirm('Archive this onboarding? Client links stop working.') && run(() => act.mutateAsync('archive'))}>Archive</button>}
-        <Link className="btn" to={`/onboardings/${id}/steps`}>{o.status === 'draft' ? 'Edit steps' : 'Save steps as a template'}</Link>
+        <Link className="btn" to={`/onboardings/${id}/preview`}>See it as the client does</Link>
       </div>
+      {issued.length > 0 && <IssuedLinks links={issued} />}
       {o.attention === 'nudges_exhausted' && <Banner kind="warn"><strong>Needs you.</strong> This client hasn't replied to the reminders, and they have stopped. A call or a message from you might help.</Banner>}
       {o.attention === 'unreachable' && <Banner kind="warn"><strong>Needs you.</strong> There's no email address or consented phone number to reach this client on, so reminders can't go out. <Link to={`/clients/${o.client_id}`}>Add one on the client page</Link>.</Banner>}
       {o.status === 'draft' && contacts.length === 0 && <Banner kind="warn">This client has no contacts yet, so there is nobody to send a link to. <Link to={`/clients/${o.client_id}`}>Add a contact</Link>.</Banner>}
@@ -214,14 +169,10 @@ export default function OnboardingDetail() {
       {sections.map((g, i) => (
         <section key={`${g.key}-${i}`} className="section" aria-label={pretty(g.key)}>
           <h2>{pretty(g.key)}</h2>
-          <ul className="steps">{g.steps.map((s) => <AdminStepCard key={s.id} id={id} step={s} contact={contacts.find((c) => c.id === s.assignee_contact_id)} />)}</ul>
+          <ul className="steps">{g.steps.map((s) => <AdminStepCard key={s.id} id={id} step={s} contact={contacts.find((c) => c.id === s.assignee_contact_id)} members={members} />)}</ul>
         </section>
       ))}
 
-      <LinksPanel id={id} contacts={contacts} issued={issued} onIssued={setIssued} />
-      <RemindersPanel ob={o} />
-      <AiosPanel ob={o} />
-      <VoicentPanel ob={o} />
     </div>
   )
 }

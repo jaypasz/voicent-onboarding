@@ -9,6 +9,7 @@ import datetime as dt
 import uuid
 
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import true as sa_true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -39,6 +40,18 @@ class Org(Stamped, Base):
 
     name: Mapped[str] = mapped_column(String(200))
     slug: Mapped[str] = mapped_column(String(80), unique=True)
+    # Tenancy follows Voicent-App: one org per Voicent tenant, which is either a direct customer or a reseller (white-label
+    # agency) whose clients are onboarded here under the reseller's own brand. Orgs made by `seed` have no tenant.
+    voicent_tenant_id: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    account_type: Mapped[str] = mapped_column(String(20), default="direct", server_default="direct")  # direct | reseller
+    # Logo and colours, copied from the Voicent tenant (it stays the one place a reseller sets them). Set here only for an
+    # org with no tenant. {logo_url, primary_color, accent_color}, each checked by branding.clean().
+    brand: Mapped[dict] = mapped_column(JSON, default=dict)
+    # What Voicent-App doesn't have, set here: the name clients see, and the senders used to reach them.
+    brand_name: Mapped[str] = mapped_column(String(120), default="", server_default="")
+    email_from_name: Mapped[str] = mapped_column(String(120), default="", server_default="")
+    reply_to_email: Mapped[str] = mapped_column(String(200), default="", server_default="")
+    sms_from: Mapped[str] = mapped_column(String(20), default="", server_default="")  # a Twilio number on our account, E.164
 
 
 class OrgMember(Stamped, Base):
@@ -50,7 +63,27 @@ class OrgMember(Stamped, Base):
     org_id: Mapped[str] = org_fk()
     auth_user_id: Mapped[str] = mapped_column(String(64), index=True)
     email: Mapped[str] = mapped_column(String(200), default="")
-    role: Mapped[str] = mapped_column(String(20), default="admin")
+    role: Mapped[str] = mapped_column(String(20), default="admin")  # admin | manager | member | viewer, as in Voicent-App
+    # "local": made by seed or by hand, kept until removed. "voicent": copied from Voicent-App, and removed when Voicent-App
+    # says the person no longer belongs to that tenant.
+    source: Mapped[str] = mapped_column(String(20), default="local", server_default="local")
+    name: Mapped[str] = mapped_column(String(200), default="", server_default="")
+    # Their own choice: also email them the notifications they get in the app (assignments, a client finishing a step...).
+    notify_email: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa_true())
+
+
+class OrgInvite(Stamped, Base):
+    """Someone asked to join an org that has no Voicent tenant (a linked org's people come from Voicent-App). Accepted when a
+    person signs in with that email address; until then nothing is granted."""
+
+    __tablename__ = "org_invites"
+    __table_args__ = (UniqueConstraint("org_id", "email"),)
+
+    org_id: Mapped[str] = org_fk()
+    email: Mapped[str] = mapped_column(String(200))  # stored lower-case
+    role: Mapped[str] = mapped_column(String(20), default="member")
+    invited_by: Mapped[str] = mapped_column(String(200), default="")
+    accepted_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Client(Stamped, Base):
@@ -63,6 +96,9 @@ class Client(Stamped, Base):
     notes: Mapped[str] = mapped_column(Text, default="")
     # Reminders respect the client's local time (an IANA name such as America/New_York).
     timezone: Mapped[str] = mapped_column(String(64), default="America/New_York", server_default="America/New_York")
+    # Set when Jay marks the client as paying. A Voicent workspace is only ever asked for once a client pays: a prospect who
+    # finishes onboarding but never pays stays a lead, and leads are kept out of Voicent-App.
+    paying_since: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     contacts: Mapped[list["Contact"]] = relationship(back_populates="client", cascade="all, delete-orphan")
     onboardings: Mapped[list["Onboarding"]] = relationship(back_populates="client")
@@ -147,6 +183,8 @@ class Onboarding(Stamped, Base):
     provision_error: Mapped[str] = mapped_column(String(300), default="", server_default="")  # our own wording, never the receiver's
     provisioned_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     voicent_workspace_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # The team member who looks after this onboarding: told when it finishes or the client goes quiet.
+    owner_member_id: Mapped[str | None] = mapped_column(ForeignKey("org_members.id", ondelete="SET NULL"), nullable=True, index=True)
 
     client: Mapped[Client] = relationship(back_populates="onboardings")
     steps: Mapped[list["Step"]] = relationship(back_populates="onboarding", cascade="all, delete-orphan", order_by="Step.position")
@@ -168,6 +206,8 @@ class Step(Stamped, Base):
     position: Mapped[int] = mapped_column(Integer, default=0)
     visibility: Mapped[str] = mapped_column(String(20), default="client")  # client | internal
     assignee_contact_id: Mapped[str | None] = mapped_column(ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True)
+    # Who on our side follows this step up (the contact above is who answers it on the client's side). Never shown to clients.
+    team_assignee_id: Mapped[str | None] = mapped_column(ForeignKey("org_members.id", ondelete="SET NULL"), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="pending")  # pending | in_progress | done | skipped
     due_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -269,3 +309,21 @@ class SyncLog(Stamped, Base):
     action: Mapped[str] = mapped_column(String(40))
     status: Mapped[str] = mapped_column(String(20))  # ok | failed
     detail: Mapped[str] = mapped_column(String(300), default="")
+
+
+class Notification(Stamped, Base):
+    """Something a team member should know about. Shown in the app; also emailed when they want that. The text is our own
+    wording (who did what, where); it never carries what a client typed."""
+
+    __tablename__ = "notifications"
+    __table_args__ = (Index("ix_notifications_member_read", "member_id", "read_at"),)
+
+    org_id: Mapped[str] = org_fk()
+    member_id: Mapped[str] = mapped_column(ForeignKey("org_members.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(40))  # assigned_onboarding | assigned_step | step_done | completed | quiet
+    onboarding_id: Mapped[str | None] = mapped_column(ForeignKey("onboardings.id", ondelete="CASCADE"), nullable=True, index=True)
+    step_key: Mapped[str] = mapped_column(String(80), default="")
+    text: Mapped[str] = mapped_column(String(300))
+    read_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # none (not wanted) | pending | sending (claimed by one sender) | sent | failed
+    email_state: Mapped[str] = mapped_column(String(20), default="none", server_default="none")

@@ -19,8 +19,9 @@ from .db import Base, make_engine
 from .errors import ServiceError
 from .provision import Sender as ProvisionSender
 from .ratelimit import RateLimiter
-from .routers import clients, health, onboardings, portal, templates
+from .routers import clients, health, onboardings, org, portal, team, templates
 from .storage import Storage
+from .voicent_directory import CachedDirectory, VoicentDirectory
 
 log = logging.getLogger("uvicorn.error")
 
@@ -55,6 +56,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.engine = engine
     app.state.sessionmaker = sessionmaker(engine, expire_on_commit=False)
     app.state.storage = Storage(settings) if settings.uploads_enabled else None
+    app.state.directory = CachedDirectory(VoicentDirectory(settings)) if settings.tenancy_enabled else None
     app.state.notifier = Notifier(settings)
     app.state.clock = lambda: dt.datetime.now(dt.timezone.utc)  # a seam so tests can say what time it is
     app.state.aios = AiosClient(settings) if settings.aios_sync_enabled else None
@@ -67,10 +69,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-        allow_headers=["Authorization", "Content-Type"],
+        allow_headers=["Authorization", "Content-Type", "X-Org-Id"],
     )
 
-    for r in (health.router, clients.router, templates.router, onboardings.router, portal.router):
+    for r in (health.router, org.router, team.router, clients.router, templates.router, onboardings.router, portal.router):
         app.include_router(r, prefix="/api")
     _serve_frontend(app, settings.static_dir)
 

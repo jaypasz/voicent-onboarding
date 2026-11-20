@@ -39,12 +39,13 @@ class Notifier:
         self.s = settings
         self.http = client or httpx.Client(timeout=15.0)
 
-    def send_sms(self, to: str, body: str) -> SendResult:
+    def send_sms(self, to: str, body: str, sender: str | None = None) -> SendResult:
+        """`sender`: the org's own number on our Twilio account (branding.sms_from), else TWILIO_FROM_NUMBER."""
         s = self.s
         try:
             r = self.http.post(
                 f"https://api.twilio.com/2010-04-01/Accounts/{s.twilio_account_sid}/Messages.json",
-                data={"To": to, "From": s.twilio_from_number, "Body": body},
+                data={"To": to, "From": sender or s.twilio_from_number, "Body": body},
                 auth=(s.twilio_account_sid, s.twilio_auth_token),
             )
         except httpx.HTTPError:
@@ -62,13 +63,17 @@ class Notifier:
             return SendResult(False, "That phone number can't receive text messages.")
         return SendResult(False, f"The text message service refused it (status {r.status_code}).")
 
-    def send_email(self, to: str, subject: str, text: str, html: str) -> SendResult:
+    def send_email(self, to: str, subject: str, text: str, html: str, sender: str | None = None, reply_to: str | None = None) -> SendResult:
+        """`sender`: 'Org name <our verified address>' (branding.email_from); `reply_to`: the org's own address, if set."""
         s = self.s
+        body = {"from": sender or s.resend_from, "to": [to], "subject": subject, "text": text, "html": html}
+        if reply_to:
+            body["reply_to"] = reply_to
         try:
             r = self.http.post(
                 "https://api.resend.com/emails",
                 headers={"Authorization": f"Bearer {s.resend_api_key}"},
-                json={"from": s.resend_from, "to": [to], "subject": subject, "text": text, "html": html},
+                json=body,
             )
         except httpx.HTTPError:
             return SendResult(False, "The email service didn't answer.")

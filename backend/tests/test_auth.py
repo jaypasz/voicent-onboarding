@@ -30,7 +30,7 @@ def test_bad_tokens_are_refused(secure_client):
 
 def test_user_jwt_and_service_token_both_work(secure_client):
     r = secure_client.get("/api/me", headers={"Authorization": f"Bearer {token()}"})
-    assert r.json() == {"id": "user-1", "label": "jay@example.com", "kind": "user"}
+    assert r.json() | {"orgs": None} == {"id": "user-1", "label": "jay@example.com", "kind": "user", "email": "jay@example.com", "superuser": False, "orgs": None}
     r = secure_client.get("/api/me", headers={"Authorization": f"Bearer {SERVICE_TOKEN}"})
     assert r.json()["kind"] == "service"
 

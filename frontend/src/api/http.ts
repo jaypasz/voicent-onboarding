@@ -27,6 +27,13 @@ export function setAdminTokenGetter(fn: () => Promise<string | null>) {
   adminToken = fn
 }
 
+let adminOrg: () => string | null = () => null
+
+/** The admin app registers which organization it is working in (sent as X-Org-Id). Never sent with portal calls. */
+export function setAdminOrgGetter(fn: () => string | null) {
+  adminOrg = fn
+}
+
 function detailText(detail: unknown): string {
   if (typeof detail === 'string') return detail
   if (Array.isArray(detail)) return 'Some of what was sent is not valid.'
@@ -37,6 +44,8 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
   const headers: Record<string, string> = {}
   const token = opts.token === undefined ? await adminToken() : opts.token
   if (token) headers.Authorization = `Bearer ${token}`
+  const org = opts.token === undefined ? adminOrg() : null
+  if (org) headers['X-Org-Id'] = org
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json'
   let res: Response
   try {

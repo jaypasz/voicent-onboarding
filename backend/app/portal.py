@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
-from . import magic_link
+from . import branding, magic_link
 from . import models as m
 from . import services
 from .config import Settings
@@ -84,7 +84,7 @@ def step_view(db: Session, ctx: Ctx, step: m.Step) -> dict:
     }
 
 
-def onboarding_view(db: Session, ctx: Ctx) -> dict:
+def onboarding_view(db: Session, ctx: Ctx, settings: Settings) -> dict:
     ob, contact = ctx.onboarding, ctx.contact
     steps = [s for s in ob.steps if _visible(ob, s, contact)]
     live = [s for s in steps if s.status != "skipped"]
@@ -96,7 +96,18 @@ def onboarding_view(db: Session, ctx: Ctx) -> dict:
         "sections": [sec for sec in ob.document["sections"] if sec["key"] in used],
         "progress": {"done": sum(1 for s in live if s.status == "done"), "total": len(live)},
         "steps": [step_view(db, ctx, s) for s in steps],
+        "brand": branding.public(db.get(m.Org, ob.org_id), settings),  # whose portal this is: never "Voicent" for a reseller's client
     }
+
+
+def preview_view(db: Session, settings: Settings, ob: m.Onboarding, contact: m.Contact | None) -> dict:
+    """What a client sees, for Jay to check before (or after) sending: the same view the portal gets, for one contact, with
+    nothing writable. A draft can be previewed too. With no contact yet, it shows what anyone with a link would see."""
+    who = contact or m.Contact(id="preview", org_id=ob.org_id, client_id=ob.client_id, name="Your client")
+    view = onboarding_view(db, Ctx(None, ob, who), settings)  # type: ignore[arg-type]  (the view never reads the link)
+    for s in view["steps"]:
+        s["can_write"] = False
+    return view | {"preview": True}
 
 
 # ---------------------------------------------------------------- what a client may do

@@ -47,12 +47,13 @@ class FakeNotifier:
         self.sms_results: list[SendResult] = []
         self.email_results: list[SendResult] = []
 
-    def send_sms(self, to, body):
+    def send_sms(self, to, body, sender=None):
         self.sms.append((to, body))
+        self.sms_from = sender
         return self.sms_results.pop(0) if self.sms_results else SendResult(True)
 
-    def send_email(self, to, subject, text, html):
-        self.emails.append({"to": to, "subject": subject, "text": text, "html": html})
+    def send_email(self, to, subject, text, html, sender=None, reply_to=None):
+        self.emails.append({"to": to, "subject": subject, "text": text, "html": html, "from": sender, "reply_to": reply_to})
         return self.email_results.pop(0) if self.email_results else SendResult(True)
 
 
