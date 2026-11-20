@@ -55,7 +55,8 @@ class TeamMember:
     role: str
 
 
-MAX_TEAM = 500
+MAX_TEAM = 500  # people per page of a team lookup
+MAX_TEAM_PAGES = 20  # a team larger than this many pages is refused rather than copied in part
 
 
 def role_of(raw) -> str:
@@ -106,10 +107,20 @@ class VoicentDirectory:
         return Person(auth_id=auth_id, tenant=tenant, role=role_of(u.get("role")), is_superuser=u.get("is_superuser") is True)
 
     def team(self, tenant_id: str) -> list[TeamMember]:
-        """Everyone in a tenant (at most MAX_TEAM), so they can be assigned before they first sign in."""
+        """Everyone in a tenant, so they can be assigned before they first sign in. Always the whole team: whoever is missing
+        from this answer loses their copied membership, so a team too large to read in MAX_TEAM_PAGES pages is a DirectoryError
+        (the last copy stays) rather than a partial list."""
         if not AUTH_ID.match(tenant_id):
             return []
-        rows = self._get("users", {"tenant_id": f"eq.{tenant_id}", "select": "auth_id,email,role", "limit": str(MAX_TEAM)})
+        rows: list[dict] = []
+        for page in range(MAX_TEAM_PAGES):
+            got = self._get("users", {"tenant_id": f"eq.{tenant_id}", "select": "auth_id,email,role", "order": "auth_id",
+                                      "limit": str(MAX_TEAM), "offset": str(page * MAX_TEAM)})
+            rows += got
+            if len(got) < MAX_TEAM:
+                break
+        else:
+            raise DirectoryError("Voicent-App's team is too large to copy in full.")
         out = []
         for r in rows:
             aid = str(r.get("auth_id") or "")

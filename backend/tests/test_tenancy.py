@@ -83,6 +83,28 @@ def test_the_cache_answers_for_a_while_and_never_keeps_a_failure():
     assert c.lookup("u") == (None, True) and inner.n == 2
 
 
+def test_a_team_is_read_page_by_page_and_one_too_large_to_read_whole_is_refused(monkeypatch):
+    """Whoever a team answer leaves out loses their copied membership, so a team is never returned in part."""
+    from app import voicent_directory as vd
+
+    monkeypatch.setattr(vd, "MAX_TEAM", 2)
+    everyone = [{"auth_id": f"aaaaaaaa-0000-0000-0000-00000000000{i}", "email": f"p{i}@acme.test", "role": "member"} for i in range(5)]
+    seen = []
+
+    def handler(req: httpx.Request):
+        seen.append(req.url.params)
+        off, lim = int(req.url.params["offset"]), int(req.url.params["limit"])
+        return httpx.Response(200, json=everyone[off:off + lim])
+
+    team = directory_with(handler).team(ACME.id)
+    assert [p.auth_id for p in team] == [r["auth_id"] for r in everyone]
+    assert [p["offset"] for p in seen] == ["0", "2", "4"] and all(p["order"] == "auth_id" for p in seen)
+
+    monkeypatch.setattr(vd, "MAX_TEAM_PAGES", 2)
+    with pytest.raises(DirectoryError):
+        directory_with(handler).team(ACME.id)
+
+
 # ---------------------------------------------------------------- who may act for which org
 
 class People:
