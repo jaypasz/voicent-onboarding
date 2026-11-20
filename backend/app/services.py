@@ -327,13 +327,18 @@ def template_document(db: Session, org_id: str, template: m.Template, version: i
     return v
 
 
-def save_template(db: Session, org_id: str, document, *, created_by: str = "") -> tuple[m.Template, m.TemplateVersion, bool]:
+def save_template(db: Session, org_id: str, document, *, created_by: str = "", create_only: bool = False) -> tuple[m.Template, m.TemplateVersion, bool]:
     """Validate and store a document. A new slug makes a template; an existing slug adds a version, unless nothing changed.
+    With create_only (a new template, or "save as template"), an existing slug is refused instead, archived ones included,
+    so a template is never changed, or brought back from the archive, by something that promised a new one.
 
     Returns (template, version, created_new_version). Raises TemplateInvalid listing every problem.
     """
     doc = loader.check(document)
     t = db.scalar(select(m.Template).where(m.Template.org_id == org_id, m.Template.slug == doc["slug"]))
+    if t is not None and create_only:
+        where = " (it's archived)" if t.archived else ""
+        raise Conflict(f"A template called “{t.name}” already uses that name{where}. Choose another name.")
     if t is None:
         t = m.Template(org_id=org_id, name=doc["name"], slug=doc["slug"], current_version=1)
         db.add(t)

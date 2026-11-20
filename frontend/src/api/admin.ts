@@ -17,7 +17,10 @@ const k = {
 // ------------------------------------------------------------------ reads
 
 export const useClients = () => useQuery({ queryKey: k.clients, queryFn: () => request<Client[]>('/clients') })
-export const useTemplates = () => useQuery({ queryKey: k.templates, queryFn: () => request<TemplateSummary[]>('/templates') })
+export const useTemplates = (includeArchived = false) => useQuery({
+  queryKey: includeArchived ? [...k.templates, 'with-archived'] : k.templates,
+  queryFn: () => request<TemplateSummary[]>(includeArchived ? '/templates?include_archived=true' : '/templates'),
+})
 export const useTemplate = (id: string) => useQuery({ queryKey: ['template', id], queryFn: () => request<TemplateDetail>(`/templates/${id}`), enabled: !!id })
 export const useOnboardings = (status?: OnboardingStatus | '', mine = false) => {
   const q = new URLSearchParams()
@@ -73,6 +76,9 @@ export const useSaveOnboardingSteps = (id: string) =>
 
 export const useSaveTemplate = () =>
   useWrite((doc: TemplateDoc) => request<TemplateDetail>('/templates', { body: doc }), (_a, r) => [k.templates, ['template', r.id]])
+/** Only ever a new template: the server refuses a name already in use, archived templates included. */
+export const useCreateTemplate = () =>
+  useWrite((doc: TemplateDoc) => request<TemplateDetail>('/templates?new=true', { body: doc }), (_a, r) => [k.templates, ['template', r.id]])
 export const checkTemplate = (doc: TemplateDoc) => request<TemplateCheck>('/templates/validate', { body: doc })
 
 type Action = 'pause' | 'resume' | 'archive'

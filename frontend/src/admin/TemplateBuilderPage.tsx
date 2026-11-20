@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
-import { checkTemplate, useSaveTemplate, useTemplate, useTemplates } from '../api/admin'
+import { checkTemplate, useCreateTemplate, useSaveTemplate, useTemplate, useTemplates } from '../api/admin'
 import { ApiError } from '../api/http'
 import StepsBuilder, { type BuilderValue } from '../builder/StepsBuilder'
 import { clean, newStep, prepare, toSlug, type TemplateDoc } from '../builder/doc'
@@ -22,10 +22,12 @@ export default function TemplateBuilderPage() {
   const from = params.get('from') ?? ''
   const sourceId = id || from
   const source = useTemplate(sourceId)
-  const templates = useTemplates()
-  const save = useSaveTemplate()
-  const nav = useNavigate()
   const editing = !!id
+  const templates = useTemplates(true) // archived ones too: a new template can't take their names
+  const saveVersion = useSaveTemplate()
+  const create = useCreateTemplate()
+  const save = editing ? saveVersion : create
+  const nav = useNavigate()
   const [settings, setSettings] = useState<Settings | null>(sourceId ? null : BLANK)
   const [value, setValue] = useState<BuilderValue>({ sections: [], steps: sourceId ? [] : prepare([newStep('form', [])]) })
   const [problems, setProblems] = useState<string[]>([])

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
-import { useSaveTemplate, useTemplates } from '../api/admin'
+import { useCreateTemplate, useTemplates } from '../api/admin'
 import { ApiError } from '../api/http'
 import type { TemplateDetail } from '../api/types'
 import { Banner, Problems } from '../components/Banner'
@@ -9,8 +9,8 @@ import { clean, toSlug, type TemplateDoc } from './doc'
 
 /** Saves these steps as a brand-new template. It never adds a version to an existing one: a taken name is refused here. */
 export default function SaveAsTemplate({ base, value }: { base: TemplateDoc; value: BuilderValue }) {
-  const templates = useTemplates()
-  const save = useSaveTemplate()
+  const templates = useTemplates(true) // archived ones too: their names are taken as well
+  const save = useCreateTemplate()
   const [name, setName] = useState('')
   const [problems, setProblems] = useState<string[]>([])
   const [saved, setSaved] = useState<TemplateDetail | null>(null)

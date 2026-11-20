@@ -82,6 +82,17 @@ describe('StepsBuilder', () => {
     expect(screen.getByText('Question 2')).toBeInTheDocument()
   })
 
+  test('the internal checklist keeps a new line and spaces while typing, and the document gets the items', async () => {
+    const spy = vi.fn()
+    const TASK: StepDoc = { key: 'build', type: 'internal_task', title: 'Build', section: '', visibility: 'internal', config: { checklist: ['Create it'] } }
+    render(<Harness steps={[TASK]} spy={spy} />)
+    await userEvent.click(screen.getByRole('button', { name: /Build/, expanded: false }))
+    const box = screen.getByLabelText('Checklist, one item per line')
+    await userEvent.type(box, '{Enter}Test it on a call')
+    expect(box).toHaveValue('Create it\nTest it on a call')
+    expect((spy.mock.calls.at(-1)![0] as BuilderValue).steps[0].config.checklist).toEqual(['Create it', 'Test it on a call'])
+  })
+
   test('removing a section moves its steps out of it', async () => {
     const spy = vi.fn()
     render(<Harness spy={spy} />)
@@ -102,6 +113,8 @@ describe('NewOnboardingPage', () => {
     'GET /clients': { body: [{ id: 'cl1', name: 'Acme', status: 'active', contacts: [] }] },
     'GET /templates': { body: [{ id: 't1', name: 'Mini', slug: 'mini', current_version: 1, archived: false }] },
     'GET /templates/t1': { body: { id: 't1', name: 'Mini', slug: 'mini', current_version: 1, archived: false, document: DOC, versions: [1] } },
+    'GET /templates?include_archived=true': { body: [{ id: 't1', name: 'Mini', slug: 'mini', current_version: 1, archived: false },
+      { id: 't0', name: 'Old mini', slug: 'old-mini', current_version: 2, archived: true }] },
   }
 
   test('the template is used as it is unless customized', async () => {
@@ -144,6 +157,22 @@ describe('NewOnboardingPage', () => {
     await userEvent.type(screen.getByLabelText('Template name'), 'Mini')
     expect(screen.getByText('A template with this name already exists. Choose another name.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save as template' })).toBeDisabled()
+  })
+
+  test("save as template refuses an archived template's name too, and asks the server for a new template only", async () => {
+    const { calls } = mockFetch({ ...base, 'POST /templates?new=true': { status: 201, body: { id: 't2', name: 'Plumbers', slug: 'plumbers', current_version: 1, archived: false, document: DOC, versions: [1] } } })
+    renderRoute(<NewOnboardingPage />, '/new', '/new')
+    await screen.findByRole('option', { name: 'Mini (v1)' })
+    await userEvent.selectOptions(screen.getByLabelText('Template'), 't1')
+    await userEvent.click(await screen.findByLabelText('Customize the steps for this client'))
+    await userEvent.type(screen.getByLabelText('Template name'), 'Old mini')
+    expect(await screen.findByText('A template with this name already exists. Choose another name.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save as template' })).toBeDisabled()
+    await userEvent.clear(screen.getByLabelText('Template name'))
+    await userEvent.type(screen.getByLabelText('Template name'), 'Plumbers')
+    await userEvent.click(screen.getByRole('button', { name: 'Save as template' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/templates?new=true')).toBe(true))
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/templates')).toBe(false)
   })
 })
 
