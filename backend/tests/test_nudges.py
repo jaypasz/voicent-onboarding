@@ -247,6 +247,30 @@ def test_after_the_maximum_number_of_reminders_it_stops_and_flags_it_for_jay(w):
     assert run(w, now=t + D(days=4)).sent == 0  # and it stays stopped
 
 
+def test_a_dry_run_at_the_cap_leaves_the_flag_and_the_owners_notification_to_the_real_pass(w):
+    ob_id = w.live(contacts=[{"name": "Pat Owner", "role": "owner", "email": "p@a.test"}])[1]
+    with w.sm() as db:
+        ob = db.get(m.Onboarding, ob_id)
+        owner = m.OrgMember(org_id=ob.org_id, auth_user_id="u-owner", email="owner@x.test", role="admin", source="local")
+        db.add(owner)
+        db.flush()
+        ob.owner_member_id = owner.id
+        db.commit()
+    t = NOON_ET
+    for _ in range(3):
+        run(w, now=t)
+        t += D(days=4)
+
+    def quiet_notes():
+        with w.sm() as db:
+            return db.scalars(select(m.Notification).where(m.Notification.onboarding_id == ob_id, m.Notification.kind == "quiet")).all()
+
+    s = run(w, now=t, dry_run=True)
+    assert s.flagged == 1 and w.get(ob_id).attention is None and not quiet_notes()
+    s = run(w, now=t)
+    assert s.flagged == 1 and w.get(ob_id).attention == "nudges_exhausted" and len(quiet_notes()) == 1
+
+
 def test_when_the_client_comes_back_the_flag_clears(w):
     _, oid, links = w.live(contacts=[{"name": "Pat Owner", "role": "owner", "email": "p@a.test"}])
     t = NOON_ET

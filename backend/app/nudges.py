@@ -211,12 +211,12 @@ def run_nudges(sm: sessionmaker, settings: Settings, notifier: Notifier, now: dt
             rounds = db.scalar(select(func.count(func.distinct(m.Nudge.round))).where(m.Nudge.onboarding_id == ob.id, m.Nudge.template == "stalled", m.Nudge.status == "sent")) or 0
             if rounds >= settings.nudge_max:
                 if ob.attention != "nudges_exhausted":
-                    ob.attention = "nudges_exhausted"
                     summary.flagged += 1
-                    if not dry_run:
-                        notifications.client_gone_quiet(db, ob, rounds)
                     summary.details.append(f"{ob.title}: no reply after {rounds} reminders")
-                db.commit()
+                    if not dry_run:  # a dry run changes nothing, so the next real pass still flags it and tells the owner
+                        ob.attention = "nudges_exhausted"
+                        notifications.client_gone_quiet(db, ob, rounds)
+                        db.commit()
                 continue
             summary.considered += 1
             outcomes = nudge_onboarding(db, settings, notifier, ob, now, manual=False, dry_run=dry_run)
