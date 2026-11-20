@@ -21,6 +21,8 @@ def test_the_four_presets_are_valid_and_cover_both_layouts():
     assert set(docs) == {"trades", "agency", "msp", "blank"}
     assert docs["trades"]["layout"] == "focus" and docs["msp"]["layout"] == "checklist"
     assert len(docs["msp"]["steps"]) > len(docs["trades"]["steps"])
+    # only the MSP onboarding sets up a Voicent workspace when it is finished
+    assert {s for s, d in docs.items() if d["on_complete"] == "provision_voicent_workspace"} == {"msp"}
     for d in docs.values():  # every preset uses only step types that exist
         assert all(s["type"] in {"form", "upload", "connect", "book_call", "approval", "internal_task"} for s in d["steps"])
 

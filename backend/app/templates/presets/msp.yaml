@@ -3,6 +3,7 @@ slug: msp
 description: Fuller onboarding for a managed service provider, with environment details, delegated access and a scope sign-off.
 layout: checklist
 nudge_after_days: 3
+on_complete: provision_voicent_workspace
 sections:
   - {key: company, title: Your company}
   - {key: environment, title: Your environment}
