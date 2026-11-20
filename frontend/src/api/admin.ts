@@ -33,7 +33,13 @@ export const useOnboarding = (id: string) => useQuery({ queryKey: k.onboarding(i
 export const useFeatures = () => useQuery({ queryKey: ['features'], queryFn: () => request<Features>('/features'), staleTime: 60_000 })
 export const useNudgeHistory = (id: string) => useQuery({ queryKey: ['nudges', id], queryFn: () => request<NudgeRow[]>(`/onboardings/${id}/nudges`) })
 export const useSyncStatus = (id: string) => useQuery({ queryKey: ['sync', id], queryFn: () => request<SyncState>(`/onboardings/${id}/sync`) })
-export const useProvisionStatus = (id: string) => useQuery({ queryKey: ['provision', id], queryFn: () => request<ProvisionStatus>(`/onboardings/${id}/provision`) })
+/** While a delivery is waiting or under way it is read again every few seconds, so its outcome shows without a reload. */
+export const PROVISION_POLL_MS = 5_000
+export const useProvisionStatus = (id: string) => useQuery({
+  queryKey: ['provision', id],
+  queryFn: () => request<ProvisionStatus>(`/onboardings/${id}/provision`),
+  refetchInterval: (q) => (q.state.data?.state === 'pending' ? PROVISION_POLL_MS : false),
+})
 export const useOnboardingDocument = (id: string) =>
   useQuery({ queryKey: ['document', id], queryFn: () => request<OnboardingDocument>(`/onboardings/${id}/document`) })
 export const useMe = () => useQuery({ queryKey: ['me'], queryFn: () => request<Me>('/me'), staleTime: 60_000 })
@@ -88,9 +94,9 @@ export const useSend = (id: string) => useWrite(() => request<SentOnboarding>(`/
 
 type StepAction = 'complete' | 'skip' | 'reopen'
 export const useStepAction = (id: string) =>
-  useWrite((a: { key: string; action: StepAction }) => request(`/onboardings/${id}/steps/${a.key}/${a.action}`, { body: {} }), () => [k.onboarding(id), k.onboardings])
+  useWrite((a: { key: string; action: StepAction }) => request(`/onboardings/${id}/steps/${a.key}/${a.action}`, { body: {} }), () => [k.onboarding(id), k.onboardings, ['provision', id]])
 export const useAnswerStep = (id: string) =>
-  useWrite((a: { key: string; data: unknown }) => request(`/onboardings/${id}/steps/${a.key}`, { method: 'PUT', body: { data: a.data } }), () => [k.onboarding(id), k.onboardings])
+  useWrite((a: { key: string; data: unknown }) => request(`/onboardings/${id}/steps/${a.key}`, { method: 'PUT', body: { data: a.data } }), () => [k.onboarding(id), k.onboardings, ['provision', id]])
 export const useAdminComment = (id: string) =>
   useWrite((a: { key: string; body: string; client_visible: boolean }) => request(`/onboardings/${id}/steps/${a.key}/comments`, { body: { body: a.body, client_visible: a.client_visible } }), () => [k.onboarding(id)])
 

@@ -2,6 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { Client, OnboardingDetail, OnboardingSummary } from '../api/types'
+import { PROVISION_POLL_MS, useAnswerStep, useStepAction } from '../api/admin'
 import { mockFetch, renderRoute } from '../test/helpers'
 import AiosPanel from './AiosPanel'
 import ClientDetail from './ClientDetail'
@@ -272,6 +273,50 @@ describe('VoicentPanel', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Send to Voicent-App now' }))
     expect(await screen.findByText('Voicent-App accepted it (workspace ws_9).')).toBeInTheDocument()
     expect(calls.some((c) => c.method === 'POST' && c.path === '/onboardings/o1/provision')).toBe(true)
+  })
+
+  test('while a delivery is on its way the panel reads it again until the outcome shows, without a reload', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      let reads = 0
+      mockFetch({ 'GET /onboardings/o1/provision': () => (++reads === 1 ? prov({ state: 'pending', attempts: 1 }) : prov({ state: 'delivered', workspace_id: 'ws_7' })) })
+      renderRoute(<VoicentPanel ob={done} />, '/', '/')
+      expect(await screen.findByText('On its way')).toBeInTheDocument()
+      await vi.advanceTimersByTimeAsync(PROVISION_POLL_MS)
+      expect(await screen.findByText(/workspace ws_7/)).toBeInTheDocument()
+      const after = reads
+      await vi.advanceTimersByTimeAsync(PROVISION_POLL_MS * 2)
+      expect(reads).toBe(after) // once it has an outcome it stops asking
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test('finishing a step on the page reads the provisioning status again', async () => {
+    let reads = 0
+    mockFetch({
+      'GET /onboardings/o1/provision': () => (++reads === 1 ? prov() : prov({ state: 'delivered', workspace_id: 'ws_8' })),
+      'POST /onboardings/o1/steps/build/complete': { body: {} },
+      'PUT /onboardings/o1/steps/basics': { body: {} },
+    })
+    function Page() {
+      const action = useStepAction('o1')
+      const answer = useAnswerStep('o1')
+      return (
+        <>
+          <VoicentPanel ob={done} />
+          <button onClick={() => action.mutate({ key: 'build', action: 'complete' })}>Finish build</button>
+          <button onClick={() => answer.mutate({ key: 'basics', data: {} })}>Answer basics</button>
+        </>
+      )
+    }
+    renderRoute(<Page />, '/', '/')
+    expect(await screen.findByText('Not yet')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Finish build' }))
+    expect(await screen.findByText(/workspace ws_8/)).toBeInTheDocument()
+    const after = reads
+    await userEvent.click(screen.getByRole('button', { name: 'Answer basics' }))
+    await waitFor(() => expect(reads).toBeGreaterThan(after))
   })
 
   test('once requested it names the workspace and offers to send the latest answers again', async () => {
