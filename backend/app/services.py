@@ -136,8 +136,13 @@ def _admins_left(db: Session, org_id: str, without: str) -> int:
 
 
 def change_member(db: Session, org_id: str, member_id: str, *, role: str | None = None, remove: bool = False) -> m.OrgMember | None:
-    """Roles of people copied from Voicent-App are set there. The last admin can't be removed or demoted."""
-    org = get_org(db, org_id)
+    """Roles of people copied from Voicent-App are set there. The last admin can't be removed or demoted.
+
+    The org row is locked first, so two of these for one org run one after the other: otherwise two admins removing or
+    demoting each other at once would each still see the other as an admin, and both would succeed."""
+    org = db.scalar(select(m.Org).where(m.Org.id == org_id).with_for_update().execution_options(populate_existing=True))
+    if not org:
+        raise NotFound("Organization not found.")
     row = _member(db, org_id, member_id)
     if row.source == "voicent" or org.voicent_tenant_id:
         raise Conflict("This person's role comes from Voicent-App. Change it there.")
@@ -228,8 +233,15 @@ def update_client(db: Session, org_id: str, client_id: str, **fields) -> m.Clien
 def set_client_paying(db: Session, org_id: str, client_id: str, paying: bool, at: dt.datetime) -> tuple[m.Client, list[str]]:
     """Mark a client as paying, or not. A Voicent workspace is only asked for once a client pays, so marking one as paying
     queues the request for every finished onboarding of theirs whose template wants a workspace. Unmarking cancels any
-    request still waiting; one already accepted by Voicent-App stays. Returns the client and the onboarding ids queued."""
-    c = _client(db, org_id, client_id)
+    request still waiting; one already accepted by Voicent-App stays. Returns the client and the onboarding ids queued.
+
+    The client row is locked before its onboardings are read, and finishing an onboarding takes the same lock (_after_change),
+    so marking a client as paying and their last step can't each miss the other and leave a finished, paying client with no
+    request queued."""
+    c = db.scalar(select(m.Client).where(m.Client.id == client_id, m.Client.org_id == org_id).with_for_update()
+                  .execution_options(populate_existing=True))
+    if not c:
+        raise NotFound("Client not found.")
     queued = []
     obs = list(db.scalars(select(m.Onboarding).where(m.Onboarding.client_id == c.id, m.Onboarding.org_id == org_id)))
     if paying:
@@ -652,6 +664,8 @@ def _after_change(db: Session, ob: m.Onboarding) -> None:
     ob.sync_version += 1  # AIOS needs to hear about this
     if ob.status == "active" and ob.steps and all(s.status in ("done", "skipped") for s in ob.steps):
         ob.status, ob.completed_at = "completed", now()
+        if ob.client_id:  # wait for, then re-read, a payment being marked at this moment (see set_client_paying)
+            db.scalar(select(m.Client).where(m.Client.id == ob.client_id).with_for_update().execution_options(populate_existing=True))
         provision.queue(ob, ob.completed_at)  # sent after the response by provision.kick, or by the timer
         notifications.onboarding_completed(db, ob)
     db.flush()
