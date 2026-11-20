@@ -483,11 +483,24 @@ def update_onboarding_steps(db: Session, org_id: str, onboarding_id: str, *, sec
         elif old_roles.get(d["key"], "") != d["assignee_role"]:
             s.assignee_contact_id = _assignee(contacts, d["assignee_role"])
         s.type, s.title, s.section, s.position, s.visibility = d["type"], d["title"], d["section"], i, d["visibility"]
+        _recheck_answer(s, d["config"])
     ob.document = doc  # a new object, so the JSON column is seen as changed
     ob.sync_version += 1
     db.flush()
     db.expire(ob, ["steps"])  # reload in position order
     return ob
+
+
+def _recheck_answer(step: m.Step, config: dict) -> None:
+    """A done step whose settings were just edited is checked again against them, using its latest answer: a new required
+    question, or a changed one, reopens it, so it isn't skipped as finished. The answers stay as they were."""
+    if step.status != "done" or not step.responses:
+        return
+    stype = registry.get(step.type)
+    latest = max(step.responses, key=lambda r: r.revision)
+    _, problems = stype.validate_response(config, latest.data)
+    if problems or stype.resulting_status(config, latest.data) != "done":
+        step.status, step.completed_at = "in_progress", None
 
 
 def send_onboarding(db: Session, org_id: str, onboarding_id: str) -> m.Onboarding:
