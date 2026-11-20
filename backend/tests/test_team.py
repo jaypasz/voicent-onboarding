@@ -178,8 +178,10 @@ def test_a_client_answering_tells_the_step_follower_then_the_owner_finishing_tel
     assert ("completed", "“Mini: Shop” is finished.", "sent") in notes(t, "u-jay")  # already emailed after the response
     # the emails went out after the responses, and say what happened, never what the client typed
     assert {e["to"] for e in t.mail.emails} == {"kim@bakery.test", "jay@bakery.test"}
-    for e in t.mail.emails:
-        assert secret not in e["text"] + e["html"] and f"https://onboard.test/onboardings/{ob['id']}" in e["text"]
+    with t.sm() as db:
+        org_id = db.get(m.Onboarding, ob["id"]).org_id
+    for e in t.mail.emails:  # the link names the org, for someone who works in several
+        assert secret not in e["text"] + e["html"] and f"https://onboard.test/onboardings/{ob['id']}?org={org_id}" in e["text"]
         assert e["from"] == "Voicent <hello@voicent.test>"  # a direct customer with no brand name set goes out under the configured name
     assert all(state == "sent" for _, _, state in notes(t, "u-kim") if _ == "step_done")
 

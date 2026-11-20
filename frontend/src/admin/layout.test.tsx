@@ -25,6 +25,7 @@ function renderAt(path = '/', orgs = [ORG]) {
         <Route element={<AdminLayout />}>
           <Route index element={<p>Home page</p>} />
           <Route path="templates" element={<p>Templates page</p>} />
+          <Route path="onboardings/:id" element={<p>Onboarding page</p>} />
         </Route>
       </Routes>
     </MemoryRouter>
@@ -81,6 +82,20 @@ describe('the left menu', () => {
     expect(calls.find((c) => c.path === '/org')!.headers['X-Org-Id']).toBe('org-a')
     expect(screen.queryByRole('combobox', { name: 'Organization' })).toBeNull() // only one to work in
     expect(await screen.findByRole('link', { name: 'Notifications, 3 new' })).toBeInTheDocument()
+  })
+
+  test("a link that names an org (from a notification email) opens in that org, if it is one of yours", async () => {
+    const other = { id: 'org-b', name: 'Voicent', account_type: 'direct', role: 'admin' }
+    localStorage.setItem('vo.org', 'org-a') // last worked in the other org
+    const { calls } = renderAt('/onboardings/o1?org=org-b', [ORG, other])
+    await screen.findByText('Onboarding page')
+    await waitFor(() => expect(calls.find((c) => c.path === '/org')!.headers['X-Org-Id']).toBe('org-b'))
+    expect(localStorage.getItem('vo.org')).toBe('org-b')
+    document.body.innerHTML = ''
+    const second = renderAt('/onboardings/o1?org=org-zzz', [ORG, other]) // not one of yours: the remembered one stays
+    await screen.findByText('Onboarding page')
+    await waitFor(() => expect(second.calls.find((c) => c.path === '/org')!.headers['X-Org-Id']).toBe('org-b'))
+    expect(localStorage.getItem('vo.org')).toBe('org-b')
   })
 
   test('with several orgs (a Voicent superuser) the choice is offered and remembered', async () => {

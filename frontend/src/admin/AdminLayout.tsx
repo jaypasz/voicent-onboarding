@@ -29,15 +29,19 @@ const KEY = 'vo.sidebar.collapsed'
 const remembered = (): boolean => { try { return localStorage.getItem(KEY) === '1' } catch { return false } }
 const remember = (v: boolean) => { try { localStorage.setItem(KEY, v ? '1' : '0') } catch { /* not kept, which is fine */ } }
 
-/** Picks the organization to work in (remembered; the only one, or the first, by default) before any page loads. */
+/** Picks the organization to work in before any page loads: the one a link names with ?org= (an email about an onboarding
+ * names its org) when it is one of yours, else the remembered one, else the only one or the first. */
 export default function AdminLayout() {
   const me = useMe()
   const qc = useQueryClient()
-  const [chosen, setChosen] = useState<string | null>(rememberedOrg)
+  const { search } = useLocation()
+  const [chosen, setChosen] = useState<string | null>(() => new URLSearchParams(search).get('org') ?? rememberedOrg())
   const orgs = me.data?.orgs ?? []
-  const org = orgs.find((o) => o.id === chosen) ?? orgs[0] ?? null
+  const org = orgs.find((o) => o.id === chosen) ?? orgs.find((o) => o.id === rememberedOrg()) ?? orgs[0] ?? null
   // every admin request from here on says which organization it is for
   setAdminOrgGetter(() => org?.id ?? null)
+  // a linked org that turned out to be yours becomes the one remembered, as if picked from the menu
+  useEffect(() => { if (org && org.id === chosen && chosen !== rememberedOrg()) rememberOrg(org.id) }, [org, chosen])
 
   if (me.isPending) return <main className="narrow"><p>Loading…</p></main>
   if (me.isError) return <main className="narrow stack"><LoadError error={me.error} what="your account" /></main>

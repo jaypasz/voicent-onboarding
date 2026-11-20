@@ -113,7 +113,8 @@ def mark_read(db: Session, org_id: str, member_id: str | None, ids: list[str] | 
 # ---------------------------------------------------------------- emailing them
 
 def _email(settings: Settings, org: m.Org, n: m.Notification) -> tuple[str, str, str]:
-    link = f"{settings.app_url}/onboardings/{n.onboarding_id}" if n.onboarding_id else settings.app_url
+    # the org goes in the link: someone in several orgs may be working in another one, and the onboarding is only found in its own
+    link = f"{settings.app_url}/onboardings/{n.onboarding_id}?org={n.org_id}" if n.onboarding_id else settings.app_url
     name = branding.display_name(org, settings)
     text = f"{n.text}\n\nOpen it: {link}\n\nYou get these because you're on the {name} team. Turn them off on the Team page."
     page = (f"<p>{html.escape(n.text)}</p><p><a href=\"{html.escape(link)}\">Open it</a></p>"
