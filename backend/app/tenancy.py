@@ -129,5 +129,9 @@ def access_for(db: Session, directory, auth_id: str, email: str) -> Access:
             superuser = bool(person and person.is_superuser)
         except DirectoryError as e:
             log.warning("Voicent tenancy: %s Using the memberships last copied from it.", e)
+    # What Voicent-App just said is saved now, on its own, not with the request. A removal or downgrade usually ends this
+    # request in a 403, which rolls the request back; the directory's cached answer then stops the next requests syncing
+    # again, so a rolled-back removal would let the person back in until the cache expired.
+    db.commit()
     rows = db.execute(select(m.OrgMember.org_id, m.OrgMember.role).where(m.OrgMember.auth_user_id == auth_id)).all()
     return Access(orgs={org_id: (role if role in RANK else "viewer") for org_id, role in rows}, superuser=superuser)

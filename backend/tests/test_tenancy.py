@@ -140,6 +140,30 @@ def test_roles_follow_voicent_and_removal_takes_access_away(t):
     assert t.get("/api/clients", headers=h).status_code == 403
 
 
+def test_a_removal_or_downgrade_sticks_while_the_directory_answer_is_cached():
+    """The request that learns of a removal ends in a 403 and is rolled back. The sync must survive that: the next requests
+    use the cached answer and don't sync again, so a rolled-back removal would let the person back in for five minutes."""
+    app = create_app(Settings(database_url="sqlite://", supabase_jwt_secret=JWT_SECRET, app_url="https://onboard.test"))
+    people, now = People(), [0.0]
+    app.state.directory = CachedDirectory(people, seconds=300, clock=lambda: now[0])
+    with TestClient(app) as c:
+        people.set("u-gone", ACME, "member")
+        people.set("u-down", ACME, "member")
+        assert c.get("/api/clients", headers=bearer("u-gone")).status_code == 200
+        assert c.post("/api/clients", json={"name": "Shop"}, headers=bearer("u-down")).status_code == 201
+        del people.people["u-gone"]
+        people.set("u-down", ACME, "viewer")
+        now[0] = 301  # the cached answers expire; the next request of each gets the new one
+        assert c.get("/api/clients", headers=bearer("u-gone")).status_code == 403
+        assert c.post("/api/clients", json={"name": "Shop 2"}, headers=bearer("u-down")).status_code == 403
+        now[0] = 302  # still cached: no sync on these requests
+        assert c.get("/api/clients", headers=bearer("u-gone")).status_code == 403
+        assert c.post("/api/clients", json={"name": "Shop 3"}, headers=bearer("u-down")).status_code == 403
+        with app.state.sessionmaker() as db:
+            assert db.scalar(select(m.OrgMember).where(m.OrgMember.auth_user_id == "u-gone")) is None
+            assert db.scalar(select(m.OrgMember.role).where(m.OrgMember.auth_user_id == "u-down")) == "viewer"
+
+
 def test_moving_to_another_tenant_moves_access_and_tenants_never_see_each_other(t):
     t.people.set("u-cy", ACME, "admin")
     t.people.set("u-di", DIRECT, "admin")
