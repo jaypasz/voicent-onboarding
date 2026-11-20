@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useProvisionNow, useProvisionStatus } from '../api/admin'
+import { useProvisionNow, useProvisionStatus, useSetPaying } from '../api/admin'
 import { ApiError } from '../api/http'
 import type { OnboardingDetail, ProvisionStatus } from '../api/types'
 import { Banner } from '../components/Banner'
@@ -8,7 +8,11 @@ import { formatDateTime } from '../lib/format'
 type Shown = Exclude<ProvisionStatus['state'], 'not_wanted'>
 
 const STATE: Record<Shown, { glyph: string; label: string; badge: string; text: (s: ProvisionStatus) => string }> = {
-  waiting: { glyph: '○', label: 'Not yet', badge: '', text: () => 'When the client has finished every step, Voicent-App is asked to set up their workspace.' },
+  waiting: { glyph: '○', label: 'Not yet', badge: '', text: () => 'Once the client has finished every step and is a paying customer, Voicent-App is asked to set up their workspace.' },
+  unpaid: {
+    glyph: '◔', label: 'Waiting for payment', badge: 'badge-in_progress',
+    text: () => "The client has finished. Their workspace is only set up once they're a paying customer; until then they stay a lead and nothing goes to Voicent-App.",
+  },
   pending: {
     glyph: '◐', label: 'On its way', badge: '',
     text: (s) => (s.attempts === 0 ? 'Going to Voicent-App in the background within a few minutes.' : `Not through yet. It tries again by itself${s.next_attempt_at ? ` at ${formatDateTime(s.next_attempt_at)}` : ''}.`),
@@ -25,10 +29,22 @@ const STATE: Record<Shown, { glyph: string; label: string; badge: string; text: 
 export default function VoicentPanel({ ob }: { ob: OnboardingDetail }) {
   const status = useProvisionStatus(ob.id)
   const send = useProvisionNow(ob.id)
+  const paying = useSetPaying(ob.client_id)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null)
   const s = status.data
   if (s && !s.wanted) return null
+
+  async function markPaying() {
+    if (!window.confirm('Mark this client as a paying customer? Voicent-App is then asked to set up their workspace.')) return
+    setError(null)
+    try {
+      await paying.mutateAsync(true)
+      await status.refetch()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'That did not work.')
+    }
+  }
 
   async function run() {
     setError(null)
@@ -42,7 +58,7 @@ export default function VoicentPanel({ ob }: { ob: OnboardingDetail }) {
   }
 
   const info = s && s.state !== 'not_wanted' ? STATE[s.state] : null
-  const canSend = s?.enabled && ob.status === 'completed' && s.state !== 'waiting'
+  const canSend = s?.enabled && ob.status === 'completed' && s.state !== 'waiting' && s.state !== 'unpaid'
   return (
     <section className="stack" aria-labelledby="voicent-h">
       <h2 id="voicent-h">Voicent workspace</h2>
@@ -55,6 +71,11 @@ export default function VoicentPanel({ ob }: { ob: OnboardingDetail }) {
       {s?.error && s.state !== 'delivered' && <p className="help">Last problem: {s.error}</p>}
       {error && <Banner kind="error">{error}</Banner>}
       {message && <Banner kind={message.ok ? 'ok' : 'error'}>{message.text}</Banner>}
+      {s?.state === 'unpaid' && (
+        <div className="row">
+          <button className="btn btn-primary" disabled={paying.isPending} onClick={() => void markPaying()}>{paying.isPending ? 'Saving…' : 'Mark as a paying customer'}</button>
+        </div>
+      )}
       {canSend && (
         <div className="row">
           <button className="btn" disabled={send.isPending} onClick={() => void run()}>

@@ -62,8 +62,8 @@ def refresh(request: Request, ctx=PortalCtx):
 
 
 @router.get("/onboarding")
-def get_onboarding(db: Session = Db, ctx=PortalCtx):
-    return portal.onboarding_view(db, ctx)
+def get_onboarding(request: Request, db: Session = Db, ctx=PortalCtx):
+    return portal.onboarding_view(db, ctx, request.app.state.settings)
 
 
 @router.put("/steps/{key}")

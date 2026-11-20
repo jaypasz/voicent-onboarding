@@ -224,3 +224,19 @@ input[type='checkbox'], input[type='radio'] { width: 22px; height: 22px; vertica
 .step-preview .card { padding: 0.5rem 0.9rem; }
 .save-bar { position: sticky; bottom: 0; z-index: 5; padding: 0.75rem 0; background: var(--bg); border-top: 1px solid var(--line); }
 @media (prefers-reduced-motion: reduce) { .step-item { transition: none !important; } }
+
+/* ---- tabs on an onboarding */
+.tabs { display: flex; gap: 0.25rem; overflow-x: auto; border-bottom: 1px solid var(--line); scrollbar-width: thin; }
+.tab { flex: none; display: inline-flex; align-items: center; min-height: 44px; padding: 0.5rem 0.9rem; color: var(--muted); font-weight: 600; text-decoration: none; border-bottom: 3px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ---- client preview and brand */
+.preview-frame { border: 2px dashed var(--line); border-radius: var(--radius); background: var(--bg); overflow: hidden; }
+.preview-frame .portal { padding-top: 1.25rem; }
+.portal-brand { display: flex; align-items: center; gap: 0.5rem; min-height: 40px; }
+.portal-logo { max-height: 44px; max-width: 200px; object-fit: contain; }
+.brand-logo { width: 32px; height: 32px; object-fit: contain; border-radius: 6px; }
+.brand-sample { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; padding: 0.75rem 1rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
+.org-switch select { min-height: 44px; }
+.admin-shell.is-collapsed .org-switch { display: none; }

@@ -1,87 +1,20 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router'
 import {
-  useAdminComment, useAnswerStep, useClients, useExtendLink, useIssueLink, useLinks, useOnboarding, useOnboardingAction, useRevokeLink, useSend, useStepAction,
+  useAdminComment, useAnswerStep, useClients, useOnboarding, useOnboardingAction, useSend, useStepAction,
 } from '../api/admin'
 import { ApiError } from '../api/http'
 import type { AdminStep, Contact, LinkInfo } from '../api/types'
 import { Banner } from '../components/Banner'
 import { LoadError } from '../components/LoadError'
-import { CopyButton } from '../components/CopyButton'
 import { ProgressBar } from '../components/ProgressBar'
-import { OnboardingBadge, StepBadge } from '../components/StatusBadge'
+import { StepBadge } from '../components/StatusBadge'
 import { dueLabel, formatDateTime } from '../lib/format'
 import StepResponse from './StepResponse'
-import AiosPanel from './AiosPanel'
-import RemindersPanel from './RemindersPanel'
-import VoicentPanel from './VoicentPanel'
+import { IssuedLinks } from './LinksPanel'
 
 function errText(e: unknown): string {
   return e instanceof ApiError ? [e.message, ...e.problems].join(' ') : 'That did not work.'
-}
-
-function IssuedLinks({ links }: { links: LinkInfo[] }) {
-  return (
-    <Banner kind="warn">
-      <strong>Copy these links now. They can't be shown again.</strong> Each one is for one person; anyone with a link can see and answer this onboarding as that person.
-      <ul className="issued">
-        {links.map((l) => (
-          <li key={l.id}>
-            <div>{l.contact_name || 'Link'}</div>
-            <input readOnly value={l.url} aria-label={`Link for ${l.contact_name}`} onFocus={(e) => e.currentTarget.select()} />
-            <CopyButton text={l.url ?? ''} />
-          </li>
-        ))}
-      </ul>
-    </Banner>
-  )
-}
-
-function LinksPanel({ id, contacts, issued, onIssued }: { id: string; contacts: Contact[]; issued: LinkInfo[]; onIssued: (l: LinkInfo[]) => void }) {
-  const links = useLinks(id)
-  const issue = useIssueLink(id)
-  const revoke = useRevokeLink(id)
-  const extend = useExtendLink(id)
-  const [contactId, setContactId] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const run = async (fn: () => Promise<unknown>) => { setError(null); try { await fn() } catch (e) { setError(errText(e)) } }
-
-  return (
-    <section className="stack" aria-labelledby="links-h">
-      <h2 id="links-h">Client links</h2>
-      {issued.length > 0 && <IssuedLinks links={issued} />}
-      {error && <Banner kind="error">{error}</Banner>}
-      {links.data?.length === 0 && <p className="help">No links yet. They are made when you send the onboarding, or you can make one below.</p>}
-      <ul className="cards">
-        {links.data?.map((l) => (
-          <li key={l.id} className="card row between wrap">
-            <div>
-              <strong>{l.contact_name}</strong>{' '}
-              <span className="badge">{l.revoked_at ? '✕ Revoked' : l.usable ? '✓ Works' : '⚠ Expired'}</span>
-              <div className="help">Expires {formatDateTime(l.expires_at)}{l.last_used_at ? ` · last opened ${formatDateTime(l.last_used_at)}` : ' · not opened yet'}</div>
-            </div>
-            {!l.revoked_at && (
-              <div className="row">
-                <button className="btn btn-small" onClick={() => run(() => extend.mutateAsync({ linkId: l.id, days: 30 }))}>Extend 30 days</button>
-                <button className="btn btn-small" onClick={() => window.confirm(`Revoke ${l.contact_name}'s link? It stops working at once.`) && run(() => revoke.mutateAsync(l.id))}>Revoke</button>
-              </div>
-            )}
-          </li>
-        ))}
-      </ul>
-      {contacts.length > 0 && (
-        <div className="row wrap">
-          <label className="field-group"><span>Make another link for</span>
-            <select value={contactId} onChange={(e) => setContactId(e.target.value)}>
-              <option value="">Choose a contact…</option>
-              {contacts.map((c) => <option key={c.id} value={c.id}>{c.name}{c.role ? ` (${c.role})` : ''}</option>)}
-            </select>
-          </label>
-          <button className="btn" disabled={!contactId || issue.isPending} onClick={() => run(async () => { onIssued([...issued, { ...(await issue.mutateAsync(contactId)), contact_name: contacts.find((c) => c.id === contactId)?.name ?? '' }]); setContactId('') })}>Make link</button>
-        </div>
-      )}
-    </section>
-  )
 }
 
 function AdminStepCard({ id, step, contact }: { id: string; step: AdminStep; contact?: Contact }) {
@@ -185,14 +118,6 @@ export default function OnboardingDetail() {
 
   return (
     <div className="stack">
-      <p><Link to="/">← Onboardings</Link></p>
-      <div className="row between wrap">
-        <div>
-          <h1>{o.title}</h1>
-          <p className="help">{client ? <Link to={`/clients/${client.id}`}>{client.name}</Link> : null} · {o.layout} layout</p>
-        </div>
-        <OnboardingBadge status={o.status} />
-      </div>
       <ProgressBar progress={o.progress} />
       {error && <Banner kind="error">{error}</Banner>}
       <div className="row wrap">
@@ -204,8 +129,9 @@ export default function OnboardingDetail() {
         {o.status === 'active' && <button className="btn" onClick={() => run(() => act.mutateAsync('pause'))}>Pause</button>}
         {o.status === 'paused' && <button className="btn btn-primary" onClick={() => run(() => act.mutateAsync('resume'))}>Resume</button>}
         {o.status !== 'archived' && <button className="btn" onClick={() => window.confirm('Archive this onboarding? Client links stop working.') && run(() => act.mutateAsync('archive'))}>Archive</button>}
-        <Link className="btn" to={`/onboardings/${id}/steps`}>{o.status === 'draft' ? 'Edit steps' : 'Save steps as a template'}</Link>
+        <Link className="btn" to={`/onboardings/${id}/preview`}>See it as the client does</Link>
       </div>
+      {issued.length > 0 && <IssuedLinks links={issued} />}
       {o.attention === 'nudges_exhausted' && <Banner kind="warn"><strong>Needs you.</strong> This client hasn't replied to the reminders, and they have stopped. A call or a message from you might help.</Banner>}
       {o.attention === 'unreachable' && <Banner kind="warn"><strong>Needs you.</strong> There's no email address or consented phone number to reach this client on, so reminders can't go out. <Link to={`/clients/${o.client_id}`}>Add one on the client page</Link>.</Banner>}
       {o.status === 'draft' && contacts.length === 0 && <Banner kind="warn">This client has no contacts yet, so there is nobody to send a link to. <Link to={`/clients/${o.client_id}`}>Add a contact</Link>.</Banner>}
@@ -218,10 +144,6 @@ export default function OnboardingDetail() {
         </section>
       ))}
 
-      <LinksPanel id={id} contacts={contacts} issued={issued} onIssued={setIssued} />
-      <RemindersPanel ob={o} />
-      <AiosPanel ob={o} />
-      <VoicentPanel ob={o} />
     </div>
   )
 }

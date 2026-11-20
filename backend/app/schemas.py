@@ -73,6 +73,7 @@ class ClientOut(BaseModel):
     notes: str
     timezone: str
     created_at: dt.datetime
+    paying_since: dt.datetime | None = None
     contacts: list[ContactOut] = []
 
 

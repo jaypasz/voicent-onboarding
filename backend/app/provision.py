@@ -1,4 +1,4 @@
-"""Ask Voicent-App to set up a workspace when an onboarding whose template says so is finished.
+"""Ask Voicent-App to set up a workspace for a paying client whose onboarding template says so, once it is finished.
 
 One signed webhook per finished onboarding. Off unless VOICENT_PROVISION_URL and VOICENT_PROVISION_SECRET are both set, and
 only for onboardings whose own template snapshot says `on_complete: provision_voicent_workspace` (so editing the template
@@ -13,9 +13,14 @@ How a delivery travels:
   can drop a repeat. Any other refusal stops and waits for Jay: asking again would get the same answer.
 - "Send again" from the admin page makes a new delivery_id for the same onboarding. The receiver treats it as an update.
 
-What goes out (the full contract is in ARCHITECTURE.md): the org, the client, its contacts, the answers to client form
-steps, and the integrations the client connected. Never a file, a comment, an internal step, an approval note or a link
-token. Text is passed through redact() again on the way out. The secret is only ever used to sign; it never travels.
+When: only for a paying client. The request is queued when the onboarding is finished and the client is marked as paying,
+whichever happens second (services.set_client_paying). A prospect who never pays is a lead, and leads stay out of Voicent-App.
+
+What goes out (the full contract is in ARCHITECTURE.md): the Voicent tenant the workspace belongs under (a reseller's client
+lands under that reseller), the org, the client, its contacts, the answers to client form steps, and the files the client
+uploaded, as links that work for an hour (each attempt makes new ones). Never a file's contents, a comment, an internal step,
+an approval, a connected-account detail or a link token. Text is passed through redact() again on the way out. The secret is
+only ever used to sign; it never travels.
 
 Errors are our own wording plus a status code. Nothing the other side says is shown or stored.
 """
@@ -37,12 +42,14 @@ from sqlalchemy.orm import Session, sessionmaker
 from . import models as m
 from .config import Settings
 from .redact import redact
+from .storage import Storage, StorageError
 
 log = logging.getLogger("uvicorn.error")
 
 ON_COMPLETE = "provision_voicent_workspace"
-EVENT = "onboarding.completed"
-SCHEMA_VERSION = 1
+EVENT = "workspace.requested"
+SCHEMA_VERSION = 2
+FILE_LINK_SECONDS = 3600  # how long each file link in a request works; every attempt makes new ones
 # Wait this long after attempt 1, 2, ... before the next one. After the last, the delivery is marked failed.
 RETRY_AFTER = (dt.timedelta(minutes=5), dt.timedelta(minutes=30), dt.timedelta(hours=2), dt.timedelta(hours=6), dt.timedelta(hours=24))
 MAX_ATTEMPTS = len(RETRY_AFTER) + 1
@@ -72,9 +79,13 @@ def wants_provisioning(ob: m.Onboarding) -> bool:
 
 def queue(ob: m.Onboarding, now: dt.datetime) -> bool:
     """Line up a delivery for an onboarding that has just been finished. A delivery that is already waiting or already went
-    through is left alone, so finishing, reopening and finishing again doesn't send twice. True if one was queued."""
+    through is left alone, so finishing, reopening and finishing again doesn't send twice. Only for a paying client: the other
+    half of the trigger is services.set_client_paying, so it goes out when both are true, whichever comes second. True if one
+    was queued."""
     if not wants_provisioning(ob) or ob.provision_state in ("pending", "delivered"):
         return False
+    if not (ob.client and ob.client.paying_since):
+        return False  # a prospect stays out of Voicent-App until they pay; marking them paying queues it then
     _reset(ob, now)
     return True
 
@@ -94,21 +105,26 @@ def request_again(ob: m.Onboarding, now: dt.datetime) -> None:
 
 # ---------------------------------------------------------------- the payload
 
-def build_payload(db: Session, settings: Settings, ob: m.Onboarding, now: dt.datetime) -> dict:
-    """Exactly what Voicent-App receives. Only client-visible steps; only form answers and connected integrations."""
+def build_payload(db: Session, settings: Settings, ob: m.Onboarding, now: dt.datetime, storage=None) -> dict:
+    """Exactly what Voicent-App receives: the tenant it belongs under, the client and its contacts, the client's form answers
+    and the files the client uploaded (as short-lived links). Only client-visible steps. Never a comment, an approval, an
+    internal step, a connected-account detail or a link token.
+
+    `storage` makes the file links. Without it (uploads switched off) files are listed with no link. If storage can't make a
+    link, StorageError escapes and the attempt counts as one that didn't get through, so it is tried again."""
     org = db.get(m.Org, ob.org_id)
     client = db.get(m.Client, ob.client_id)
     contacts = list(db.scalars(select(m.Contact).where(m.Contact.client_id == ob.client_id, m.Contact.org_id == ob.org_id).order_by(m.Contact.created_at)))
     defs = {d["key"]: d for d in ob.document["steps"]}
     answers: dict[str, dict] = {}
-    integrations: list[dict] = []
+    files: list[dict] = []
+    expires = now + dt.timedelta(seconds=FILE_LINK_SECONDS)
     for s in ob.steps:
-        if s.visibility != "client":
+        if s.visibility != "client" or s.status == "skipped":
             continue
-        d = defs.get(s.key, {})
-        config = d.get("config") or {}
+        config = defs.get(s.key, {}).get("config") or {}
         last = s.responses[-1] if s.responses else None
-        if s.type == "form" and last and s.status != "skipped":
+        if s.type == "form" and last:
             fields = {f["key"]: f for f in config.get("fields", [])}
             out = {}
             for k, v in (last.data.get("answers") or {}).items():
@@ -118,33 +134,37 @@ def build_payload(db: Session, settings: Settings, ob: m.Onboarding, now: dt.dat
                 out[k] = {"label": f["label"], "type": f["type"], "value": _clean(v)}
             if out:
                 answers[s.key] = out
-        elif s.type == "connect":
-            data = last.data if last else {}
-            integrations.append({
-                "step_key": s.key, "provider": config.get("provider", ""), "label": config.get("label", ""),
-                "access_mode": config.get("access_mode", "oauth"),
-                "status": "skipped" if s.status == "skipped" else data.get("status", "not_started"),
-                "account_label": redact(str(data.get("account_label", "")))[:200],
-            })
+        elif s.type == "upload" and last:
+            owned = {f.id: f for f in s.files}
+            for fid in last.data.get("file_ids") or []:  # only the files in the accepted answer, not every attempt
+                f = owned.get(fid)
+                if f is None:
+                    continue
+                files.append({
+                    "step_key": s.key, "step_title": s.title, "id": f.id, "name": f.name, "content_type": f.content_type or None,
+                    "size": f.size or None, "url": storage.signed_download(f.storage_path, ttl=FILE_LINK_SECONDS) if storage else None,
+                    "url_expires_at": _iso(expires) if storage else None,
+                })
     return {
         "event": EVENT,
         "schema_version": SCHEMA_VERSION,
         "delivery_id": ob.provision_delivery_id or "preview",
         "sent_at": _iso(now),
         "source": "voicent-onboarding",
+        "tenant": {"voicent_tenant_id": org.voicent_tenant_id, "account_type": org.account_type},
         "org": {"id": org.id, "slug": org.slug, "name": org.name},
         "onboarding": {
             "id": ob.id, "title": ob.title, "url": f"{settings.app_url}/onboardings/{ob.id}" if settings.app_url else None,
             "template": {"slug": ob.document.get("slug"), "version": ob.document.get("version"), "name": ob.document.get("name")},
             "started_at": _iso(ob.started_at), "completed_at": _iso(ob.completed_at),
         },
-        "client": {"id": client.id, "name": client.name, "kind": client.kind, "timezone": client.timezone},
+        "client": {"id": client.id, "name": client.name, "kind": client.kind, "timezone": client.timezone, "paying_since": _iso(client.paying_since)},
         "contacts": [{
             "id": c.id, "name": c.name, "email": c.email or None, "phone": c.phone or None, "role": c.role or None,
             "sms_consent": c.sms_consent, "sms_consent_at": _iso(c.sms_consent_at),
         } for c in contacts],
         "answers": answers,
-        "integrations": integrations,
+        "files": files,
     }
 
 
@@ -239,7 +259,7 @@ def _transient(status: int) -> bool:
 
 
 def deliver(sm: sessionmaker, settings: Settings, org_id: str, onboarding_id: str, sender: Sender | None = None,
-            now: dt.datetime | None = None, manual: bool = False) -> DeliveryResult:
+            now: dt.datetime | None = None, manual: bool = False, storage=None) -> DeliveryResult:
     """Send this onboarding's waiting delivery if it is due (or now, when Jay asked). Never raises."""
     if not settings.provisioning_enabled:
         return DeliveryResult(True, "off", "Provisioning isn't switched on.")
@@ -258,7 +278,10 @@ def deliver(sm: sessionmaker, settings: Settings, org_id: str, onboarding_id: st
             if not claimed:
                 return DeliveryResult(True, "skipped", "Nothing is waiting to go to Voicent-App.")
             ob = db.scalar(select(m.Onboarding).where(m.Onboarding.id == onboarding_id, m.Onboarding.org_id == org_id))
-            payload = build_payload(db, settings, ob, now)
+            try:
+                payload = build_payload(db, settings, ob, now, storage if storage is not None else _storage(settings))
+            except StorageError:
+                return _record(db, ob, Reply(0, None), now, what="Couldn't make the file links.")
             body = encode(payload)
             reply = (sender or Sender(settings)).post(body, headers_for(settings, payload, body, now))
             return _record(db, ob, reply, now)
@@ -267,7 +290,11 @@ def deliver(sm: sessionmaker, settings: Settings, org_id: str, onboarding_id: st
         return DeliveryResult(False, "failed", "Something unexpected went wrong while asking Voicent-App. See the server logs.")
 
 
-def _record(db: Session, ob: m.Onboarding, reply: Reply, now: dt.datetime) -> DeliveryResult:
+def _storage(settings: Settings):
+    return Storage(settings) if settings.uploads_enabled else None
+
+
+def _record(db: Session, ob: m.Onboarding, reply: Reply, now: dt.datetime, what: str | None = None) -> DeliveryResult:
     s = reply.status
     if 200 <= s < 300:
         ob.provision_state, ob.provisioned_at, ob.provision_next_at, ob.provision_error = "delivered", now, None, ""
@@ -278,7 +305,7 @@ def _record(db: Session, ob: m.Onboarding, reply: Reply, now: dt.datetime) -> De
         db.commit()
         return DeliveryResult(True, "delivered", msg)
     if _transient(s):
-        what = f"Voicent-App didn't answer{f' (status {s})' if s else ''}."
+        what = what or f"Voicent-App didn't answer{f' (status {s})' if s else ''}."
         if ob.provision_attempts >= MAX_ATTEMPTS:
             ob.provision_state, ob.provision_next_at = "failed", None
             ob.provision_error = f"{what} Gave up after {MAX_ATTEMPTS} tries."
@@ -302,7 +329,7 @@ def kick(request, background, org_id: str, onboarding_id: str) -> None:
     timer finds it. Cheap when there is nothing to send (one UPDATE that matches no row)."""
     st = request.app.state
     if st.settings.provisioning_enabled:
-        background.add_task(deliver, st.sessionmaker, st.settings, org_id, onboarding_id, st.provisioner)
+        background.add_task(deliver, st.sessionmaker, st.settings, org_id, onboarding_id, st.provisioner, storage=getattr(st, "storage", None))
 
 
 def deliver_due(sm: sessionmaker, settings: Settings, sender: Sender | None = None, now: dt.datetime | None = None, limit: int = 25) -> dict:
@@ -332,6 +359,8 @@ def status_for(db: Session, settings: Settings, ob: m.Onboarding) -> dict:
         state = "off"
     elif ob.provision_state in ("pending", "delivered", "failed"):
         state = ob.provision_state
+    elif ob.status == "completed" and not (ob.client and ob.client.paying_since):
+        state = "unpaid"  # finished, but a workspace is only asked for once the client pays
     else:
         state = "waiting"  # the client hasn't finished yet
     return {
@@ -339,5 +368,6 @@ def status_for(db: Session, settings: Settings, ob: m.Onboarding) -> dict:
         "workspace_id": ob.voicent_workspace_id, "attempts": ob.provision_attempts,
         "next_attempt_at": ob.provision_next_at if ob.provision_state == "pending" else None,
         "delivered_at": ob.provisioned_at, "error": ob.provision_error or "",
+        "client_id": ob.client_id, "paying": bool(ob.client and ob.client.paying_since),
         "log": [{"at": r.created_at, "status": r.status, "detail": r.detail} for r in rows],
     }

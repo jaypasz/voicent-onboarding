@@ -62,6 +62,21 @@ export interface PortalView {
   sections: { key: string; title: string }[]
   progress: Progress
   steps: PortalStep[]
+  /** Whose portal this is. A reseller's clients see the reseller, never Voicent. */
+  brand?: Brand
+}
+
+export interface Brand {
+  name: string
+  logo_url: string | null
+  primary_color: string | null
+  accent_color: string | null
+}
+
+/** The admin's read-only view of what a client sees. */
+export interface PreviewView extends PortalView {
+  preview: true
+  contacts: { id: string; name: string; role: string }[]
 }
 
 // ------------------------------------------------------------------ admin
@@ -85,6 +100,8 @@ export interface Client {
   notes: string
   timezone: string
   created_at: string
+  /** Set when marked as a paying customer. Only paying clients get a Voicent workspace. */
+  paying_since: string | null
   contacts: Contact[]
 }
 
@@ -205,8 +222,11 @@ export interface SyncState {
 export interface ProvisionStatus {
   enabled: boolean
   wanted: boolean
-  state: 'not_wanted' | 'off' | 'waiting' | 'pending' | 'delivered' | 'failed'
+  /** unpaid: finished, but a workspace is only asked for once the client is marked as paying. */
+  state: 'not_wanted' | 'off' | 'waiting' | 'unpaid' | 'pending' | 'delivered' | 'failed'
   workspace_id: string | null
+  client_id: string
+  paying: boolean
   attempts: number
   next_attempt_at: string | null
   delivered_at: string | null
@@ -225,4 +245,38 @@ export interface OnboardingDocument {
 export interface TemplateCheck {
   ok: boolean
   problems: string[]
+}
+
+export type Role = 'admin' | 'manager' | 'member' | 'viewer'
+
+export interface OrgChoice {
+  id: string
+  name: string
+  account_type: 'direct' | 'reseller'
+  role: Role
+}
+
+export interface Me {
+  id: string
+  email: string
+  kind: 'user' | 'service' | 'local'
+  superuser: boolean
+  orgs: OrgChoice[]
+}
+
+export interface OrgSettings {
+  id: string
+  name: string
+  slug: string
+  account_type: 'direct' | 'reseller'
+  /** Linked to a Voicent tenant: logo and colours are set in Voicent-App, not here. */
+  linked: boolean
+  role: Role
+  brand: Brand
+  logo_url: string | null
+  brand_name: string
+  email_from_name: string
+  reply_to_email: string
+  sms_from: string
+  email_from_preview: string | null
 }

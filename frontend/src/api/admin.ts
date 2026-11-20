@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { request } from './http'
 import type {
-  Client, Contact, Features, OnboardingDocument, TemplateCheck, LinkInfo, NudgeResult, NudgeRow, OnboardingDetail, OnboardingStatus, OnboardingSummary, ProvisionStatus, SentOnboarding, SyncState, TemplateDetail,
+  Client, Contact, Features, Me, OnboardingDocument, OrgSettings, PreviewView, TemplateCheck, LinkInfo, NudgeResult, NudgeRow, OnboardingDetail, OnboardingStatus, OnboardingSummary, ProvisionStatus, SentOnboarding, SyncState, TemplateDetail,
   TemplateSummary, YamlImportResult,
 } from './types'
 import type { SectionDoc, StepDoc, TemplateDoc } from '../builder/doc'
@@ -28,6 +28,10 @@ export const useSyncStatus = (id: string) => useQuery({ queryKey: ['sync', id], 
 export const useProvisionStatus = (id: string) => useQuery({ queryKey: ['provision', id], queryFn: () => request<ProvisionStatus>(`/onboardings/${id}/provision`) })
 export const useOnboardingDocument = (id: string) =>
   useQuery({ queryKey: ['document', id], queryFn: () => request<OnboardingDocument>(`/onboardings/${id}/document`) })
+export const useMe = () => useQuery({ queryKey: ['me'], queryFn: () => request<Me>('/me'), staleTime: 60_000 })
+export const useOrgSettings = (enabled = true) => useQuery({ queryKey: ['org'], queryFn: () => request<OrgSettings>('/org'), staleTime: 60_000, enabled })
+export const usePreview = (id: string, contactId: string) =>
+  useQuery({ queryKey: ['preview', id, contactId], queryFn: () => request<PreviewView>(`/onboardings/${id}/preview${contactId ? `?contact_id=${encodeURIComponent(contactId)}` : ''}`) })
 export const useLinks = (id: string) => useQuery({ queryKey: k.links(id), queryFn: () => request<LinkInfo[]>(`/onboardings/${id}/links`) })
 
 // ------------------------------------------------------------------ writes
@@ -93,3 +97,10 @@ export const usePauseReminders = (id: string) =>
 export const useSyncNow = (id: string) => useWrite(() => request<SyncState>(`/onboardings/${id}/sync`, { body: {} }), () => [['sync', id]])
 export const useProvisionNow = (id: string) =>
   useWrite(() => request<ProvisionStatus>(`/onboardings/${id}/provision`, { body: {} }), () => [['provision', id], k.onboardings])
+
+export type OrgSettingsPatch = Partial<Pick<OrgSettings, 'brand_name' | 'email_from_name' | 'reply_to_email' | 'sms_from'>> & {
+  brand?: { logo_url: string; primary_color: string; accent_color: string }
+}
+export const useSaveOrgSettings = () => useWrite((b: OrgSettingsPatch) => request<OrgSettings>('/org', { method: 'PUT', body: b }), () => [['org']])
+export const useSetPaying = (clientId: string) =>
+  useWrite((paying: boolean) => request<Client>(`/clients/${clientId}/paying`, { body: { paying } }), () => [k.clients, ['provision'], k.onboardings])

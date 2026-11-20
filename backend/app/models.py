@@ -39,6 +39,18 @@ class Org(Stamped, Base):
 
     name: Mapped[str] = mapped_column(String(200))
     slug: Mapped[str] = mapped_column(String(80), unique=True)
+    # Tenancy follows Voicent-App: one org per Voicent tenant, which is either a direct customer or a reseller (white-label
+    # agency) whose clients are onboarded here under the reseller's own brand. Orgs made by `seed` have no tenant.
+    voicent_tenant_id: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    account_type: Mapped[str] = mapped_column(String(20), default="direct", server_default="direct")  # direct | reseller
+    # Logo and colours, copied from the Voicent tenant (it stays the one place a reseller sets them). Set here only for an
+    # org with no tenant. {logo_url, primary_color, accent_color}, each checked by branding.clean().
+    brand: Mapped[dict] = mapped_column(JSON, default=dict)
+    # What Voicent-App doesn't have, set here: the name clients see, and the senders used to reach them.
+    brand_name: Mapped[str] = mapped_column(String(120), default="", server_default="")
+    email_from_name: Mapped[str] = mapped_column(String(120), default="", server_default="")
+    reply_to_email: Mapped[str] = mapped_column(String(200), default="", server_default="")
+    sms_from: Mapped[str] = mapped_column(String(20), default="", server_default="")  # a Twilio number on our account, E.164
 
 
 class OrgMember(Stamped, Base):
@@ -50,7 +62,10 @@ class OrgMember(Stamped, Base):
     org_id: Mapped[str] = org_fk()
     auth_user_id: Mapped[str] = mapped_column(String(64), index=True)
     email: Mapped[str] = mapped_column(String(200), default="")
-    role: Mapped[str] = mapped_column(String(20), default="admin")
+    role: Mapped[str] = mapped_column(String(20), default="admin")  # admin | manager | member | viewer, as in Voicent-App
+    # "local": made by seed or by hand, kept until removed. "voicent": copied from Voicent-App, and removed when Voicent-App
+    # says the person no longer belongs to that tenant.
+    source: Mapped[str] = mapped_column(String(20), default="local", server_default="local")
 
 
 class Client(Stamped, Base):
@@ -63,6 +78,9 @@ class Client(Stamped, Base):
     notes: Mapped[str] = mapped_column(Text, default="")
     # Reminders respect the client's local time (an IANA name such as America/New_York).
     timezone: Mapped[str] = mapped_column(String(64), default="America/New_York", server_default="America/New_York")
+    # Set when Jay marks the client as paying. A Voicent workspace is only ever asked for once a client pays: a prospect who
+    # finishes onboarding but never pays stays a lead, and leads are kept out of Voicent-App.
+    paying_since: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     contacts: Mapped[list["Contact"]] = relationship(back_populates="client", cascade="all, delete-orphan")
     onboardings: Mapped[list["Onboarding"]] = relationship(back_populates="client")

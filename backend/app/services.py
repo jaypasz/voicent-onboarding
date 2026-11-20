@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import models as m
-from . import provision
+from . import branding, provision
 from .errors import Conflict, Invalid, NotFound
 from .redact import redact
 from .steps import registry
@@ -44,6 +44,37 @@ def add_member(db: Session, org_id: str, auth_user_id: str, email: str = "") -> 
     db.add(row)
     db.flush()
     return row
+
+
+# ---------------------------------------------------------------- the org's own settings
+
+ORG_FIELDS = ("brand_name", "email_from_name", "reply_to_email", "sms_from")
+
+
+def get_org(db: Session, org_id: str) -> m.Org:
+    org = db.get(m.Org, org_id)
+    if not org:
+        raise NotFound("Organization not found.")
+    return org
+
+
+def update_org_settings(db: Session, org_id: str, fields: dict) -> m.Org:
+    """The name clients see and the senders that reach them. Logo and colours only for an org with no Voicent tenant: for
+    the others Voicent-App is where they are set, and they are copied from there."""
+    org = get_org(db, org_id)
+    if "brand" in fields and org.voicent_tenant_id:
+        raise Conflict("This organization's logo and colours come from Voicent-App. Change them there.")
+    fields = {k: (v.strip() if isinstance(v, str) else v) for k, v in fields.items()}
+    problems = branding.settings_problems(fields)
+    if problems:
+        raise Invalid("Some settings need fixing.", problems)
+    for k in ORG_FIELDS:
+        if k in fields and fields[k] is not None:
+            setattr(org, k, redact(fields[k]) if k in ("brand_name", "email_from_name") else fields[k])
+    if "brand" in fields and fields["brand"] is not None:
+        org.brand = branding.clean(fields["brand"])
+    db.flush()
+    return org
 
 
 # ---------------------------------------------------------------- clients and contacts
@@ -80,6 +111,29 @@ def update_client(db: Session, org_id: str, client_id: str, **fields) -> m.Clien
             setattr(c, k, redact(v.strip()) if k in ("name", "notes") else v)
     db.flush()
     return c
+
+
+def set_client_paying(db: Session, org_id: str, client_id: str, paying: bool, at: dt.datetime) -> tuple[m.Client, list[str]]:
+    """Mark a client as paying, or not. A Voicent workspace is only asked for once a client pays, so marking one as paying
+    queues the request for every finished onboarding of theirs whose template wants a workspace. Unmarking cancels any
+    request still waiting; one already accepted by Voicent-App stays. Returns the client and the onboarding ids queued."""
+    c = _client(db, org_id, client_id)
+    queued = []
+    obs = list(db.scalars(select(m.Onboarding).where(m.Onboarding.client_id == c.id, m.Onboarding.org_id == org_id)))
+    if paying:
+        if c.paying_since is None:
+            c.paying_since = at
+        db.flush()
+        for ob in obs:
+            if ob.status == "completed" and provision.queue(ob, at):
+                queued.append(ob.id)
+    else:
+        c.paying_since = None
+        for ob in obs:
+            if ob.provision_state == "pending":
+                ob.provision_state, ob.provision_next_at, ob.provision_error = None, None, ""
+    db.flush()
+    return c, queued
 
 
 def add_contact(db: Session, org_id: str, client_id: str, *, name: str, email: str = "", phone: str = "", role: str = "",
@@ -348,6 +402,8 @@ def request_provisioning(db: Session, org_id: str, onboarding_id: str, at: dt.da
         raise Conflict("This onboarding's template doesn't set up a Voicent workspace.")
     if ob.status != "completed":
         raise Conflict(f"A workspace is requested when the onboarding is finished; this one is {ob.status}.")
+    if not (ob.client and ob.client.paying_since):
+        raise Conflict(f"Mark {ob.client.name if ob.client else 'the client'} as a paying customer first. A Voicent workspace is only set up for paying customers.")
     provision.request_again(ob, at)
     db.flush()
     return ob

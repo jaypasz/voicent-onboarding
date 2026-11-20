@@ -54,6 +54,20 @@ def put_document(onboarding_id: str, body: OnboardingStepsIn, db: Session = Db, 
     return onboarding_detail(ob) | _document(ob)
 
 
+@router.get("/{onboarding_id}/preview")
+def preview(onboarding_id: str, request: Request, contact_id: str | None = None, db: Session = Db, org: str = Org):
+    """The client's view of this onboarding, read-only, for one of the client's contacts (or the first one)."""
+    from .. import portal
+
+    ob = services.get_onboarding(db, org, onboarding_id)
+    contacts = list(db.scalars(select(m.Contact).where(m.Contact.client_id == ob.client_id, m.Contact.org_id == org).order_by(m.Contact.created_at)))
+    contact = next((c for c in contacts if c.id == contact_id), None) if contact_id else (contacts[0] if contacts else None)
+    if contact_id and contact is None:
+        raise NotFound("Contact not found.")
+    return portal.preview_view(db, request.app.state.settings, ob, contact) | {
+        "contacts": [{"id": c.id, "name": c.name, "role": c.role} for c in contacts]}
+
+
 class LinkIn(BaseModel):
     contact_id: str
 
@@ -226,7 +240,8 @@ def provision_status(onboarding_id: str, request: Request, db: Session = Db, org
 
 @router.get("/{onboarding_id}/provision/payload")
 def provision_payload(onboarding_id: str, request: Request, db: Session = Db, org: str = Org):
-    """Exactly what Voicent-App would receive for this onboarding now (the body; the signature headers are added when sending)."""
+    """Exactly what Voicent-App would receive for this onboarding now (the body; the signature headers are added when sending).
+    File links are left out (url is null): a preview must not hand out working download links."""
     st = request.app.state
     ob = services.get_onboarding(db, org, onboarding_id)
     return provision.build_payload(db, st.settings, ob, st.clock())
@@ -241,6 +256,6 @@ def provision_now(onboarding_id: str, request: Request, db: Session = Db, org: s
     else:
         services.request_provisioning(db, org, onboarding_id, st.clock())
         db.commit()  # the delivery reads in its own session
-        r = provision.deliver(st.sessionmaker, st.settings, org, onboarding_id, st.provisioner, now=st.clock(), manual=True)
+        r = provision.deliver(st.sessionmaker, st.settings, org, onboarding_id, st.provisioner, now=st.clock(), manual=True, storage=st.storage)
         db.expire_all()
     return {"result": asdict(r)} | provision.status_for(db, st.settings, services.get_onboarding(db, org, onboarding_id))

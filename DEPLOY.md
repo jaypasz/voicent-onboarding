@@ -26,10 +26,11 @@ Optional (each switches off with a warning when half-set):
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | SMS nudges. Needs a number registered for A2P 10DLC before real clients |
 | `RESEND_API_KEY`, `RESEND_FROM` | Email nudges. `RESEND_FROM` must use a domain verified in Resend |
 | `AIOS_API_URL`, `AIOS_SERVICE_TOKEN` | Sync into the AIOS app. `AIOS_API_URL` is the app's address without `/api` (for example `https://voicent-aios-app-production.up.railway.app`) and must be `https://`. Give this service its own entry in the AIOS app's `SERVICE_TOKENS` so it can be rotated alone |
-| `VOICENT_PROVISION_URL`, `VOICENT_PROVISION_SECRET` | Ask Voicent-App for a workspace when an onboarding whose template has `on_complete: provision_voicent_workspace` is finished. The URL must be `https://`; the secret is random, 32+ characters, and must be the same value on the Voicent-App side. The receiving endpoint is not built yet (see ARCHITECTURE.md for the contract) |
+| `VOICENT_SUPABASE_URL`, `VOICENT_SUPABASE_SERVICE_KEY` | Tenancy from Voicent-App: who a signed-in person is (tenant, role, superuser) and their tenant's name, type and brand, read (never written) from Voicent-App's Supabase. Without them the app works as before, with orgs and members made by `seed`. See "Sharing Voicent-App's login" below. Not verified against the real Voicent-App yet |
+| `VOICENT_PROVISION_URL`, `VOICENT_PROVISION_SECRET` | Ask Voicent-App for a workspace for a **paying** client whose onboarding (on a template with `on_complete: provision_voicent_workspace`) is finished. The URL must be `https://`; the secret is random, 32+ characters, and must be the same value on the Voicent-App side. The receiving endpoint is not built yet (see ARCHITECTURE.md for the contract) |
 | `JOBS_ENABLED`, `JOBS_INTERVAL_MINUTES` | The timer for reminders, the AIOS sync and Voicent provisioning. On by default, every 15 minutes. `JOBS_ENABLED=0` turns it off. **Run one instance of this service.** |
 | `NUDGE_MAX`, `NUDGE_QUIET_START`, `NUDGE_QUIET_END`, `NUDGE_RETRY_HOURS` | Automatic reminders per onboarding before giving up (3), the night window in the client's local hours (21 to 8), and how long to wait before retrying a failed send (6) |
-| `DEFAULT_TIMEZONE`, `BRAND_NAME` | The time zone given to a new client (`America/New_York`) and the name used in reminder messages (`Voicent`) |
+| `DEFAULT_TIMEZONE`, `BRAND_NAME` | The time zone given to a new client (`America/New_York`) and the name clients see for a direct customer with no name set in Settings (`Voicent`). A reseller's clients see the reseller's name instead |
 
 Railway passes service variables to the Docker build as build args, so the two `VITE_` ones reach the frontend build. Changing them needs a redeploy.
 
@@ -65,6 +66,18 @@ Both are optional and switch themselves off, with a warning in the logs, until t
 
 **The AIOS sync** needs `AIOS_API_URL` and `AIOS_SERVICE_TOKEN`, and the same token added to `SERVICE_TOKENS` on the AIOS service. The first time it runs it creates a project for every onboarding that has already been sent. Each onboarding page shows whether it is up to date and has a "Sync now" button.
 
+## Sharing Voicent-App's login (tenancy and branding)
+
+People sign in here with their Voicent-App account, and each Voicent tenant (direct or reseller) becomes an org here with its own clients, people and brand. ARCHITECTURE.md ("Tenancy and branding") explains the rules.
+
+1. Point login at Voicent-App's Supabase project: `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (frontend, then redeploy) and `SUPABASE_JWKS_URL` (or `SUPABASE_JWT_SECRET`) are that project's.
+2. Add this app's address to that project's Auth → URL configuration (Site URL / redirect URLs), or sign-in links won't come back here.
+3. Set `VOICENT_SUPABASE_URL` (`https://<that project>.supabase.co`) and `VOICENT_SUPABASE_SERVICE_KEY` (its service role key). Only `users` and `tenants` are read, and nothing is written, but the key can do more, so keep it in Railway variables only.
+4. Sign in as a Voicent-App user. Your tenant's org is made with its name, type and logo, and your role comes with you. Voicent superusers get an organization picker in the menu.
+5. In Settings, each org's admin sets the name clients see, the email sender name, a reply-to address and (optionally) its own SMS number on our Twilio account.
+
+Your own account made with `seed` keeps working alongside this. Uploads (`SUPABASE_URL`) can stay on this app's own project, or use the same one.
+
 ## Turning Voicent provisioning on
 
 Off until Voicent-App has an endpoint that accepts it. The contract that endpoint must meet is in ARCHITECTURE.md ("Voicent-App provisioning").
@@ -73,5 +86,6 @@ Off until Voicent-App has an endpoint that accepts it. The contract that endpoin
 2. Set `VOICENT_PROVISION_URL` to the Voicent-App endpoint (`https://`).
 3. Choose which templates set up a workspace with `on_complete: provision_voicent_workspace`. The MSP preset already has it, but only an org that installs the presets after this change gets it that way. An org that already has the MSP template keeps its old copy: export it from Templates, add the line, and import it again, which saves a new version and keeps your own edits. Only onboardings created from that version on are affected; live ones keep their own copy.
 4. Check what would go: open a finished onboarding's `GET /api/onboardings/<id>/provision/payload`, or run `python -m app.cli provision --dry-run`.
+5. Mark clients as paying on their client page (or from the onboarding's "Links & follow-up" tab). Nothing is sent for a client who hasn't paid.
 
-Finished onboardings that were waiting while it was off are sent once it is on. Each onboarding page has a "Voicent workspace" panel that shows whether the request went through, and a button to send it again.
+Finished onboardings of paying clients that were waiting while it was off are sent once it is on. Each onboarding page has a "Voicent workspace" panel that shows whether the request went through, and a button to send it again.

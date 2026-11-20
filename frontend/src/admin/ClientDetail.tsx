@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router'
-import { useAddContact, useClients, useOnboardings, useUpdateClient, useUpdateContact } from '../api/admin'
+import { useAddContact, useClients, useOnboardings, useSetPaying, useUpdateClient, useUpdateContact } from '../api/admin'
+import { formatDateTime } from '../lib/format'
 import { ApiError } from '../api/http'
 import type { Contact } from '../api/types'
 import { Banner } from '../components/Banner'
@@ -29,6 +30,34 @@ function ContactRow({ clientId, c }: { clientId: string; c: Contact }) {
       <div className="help">{[c.email, c.phone].filter(Boolean).join(' · ') || 'No email or phone yet'}{c.sms_consent && c.sms_consent_source ? ` · consent: ${c.sms_consent_source}` : ''}</div>
       {error && <Banner kind="error">{error}</Banner>}
     </li>
+  )
+}
+
+/** Paying is what lets a finished onboarding set up the client's Voicent workspace. Until then they are a lead. */
+function PayingCard({ clientId, since }: { clientId: string; since: string | null }) {
+  const set = useSetPaying(clientId)
+  const [error, setError] = useState<string | null>(null)
+  async function toggle() {
+    const q = since
+      ? 'Mark this client as not paying? A Voicent workspace request still waiting is cancelled; one already set up stays.'
+      : 'Mark this client as a paying customer? Any finished onboarding of theirs that sets up a Voicent workspace is sent then.'
+    if (!window.confirm(q)) return
+    setError(null)
+    try {
+      await set.mutateAsync(!since)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'That did not work.')
+    }
+  }
+  return (
+    <section className="card row between wrap" aria-label="Paying customer">
+      <div>
+        <span className={`badge ${since ? 'badge-done' : ''}`}><span aria-hidden="true">{since ? '✓' : '○'}</span> {since ? 'Paying customer' : 'Not paying yet (a lead)'}</span>
+        <p className="help">{since ? `Since ${formatDateTime(since)}. Their Voicent workspace can be set up.` : 'No Voicent workspace is set up until they pay.'}</p>
+      </div>
+      <button className={`btn btn-small${since ? '' : ' btn-primary'}`} disabled={set.isPending} onClick={() => void toggle()}>{since ? 'Mark as not paying' : 'Mark as paying'}</button>
+      {error && <Banner kind="error">{error}</Banner>}
+    </section>
   )
 }
 
@@ -70,6 +99,7 @@ export default function ClientDetail() {
         </button>
       </div>
       <p className="help">{client.kind}{client.status === 'archived' ? ' · archived' : ''}</p>
+      <PayingCard clientId={client.id} since={client.paying_since} />
       <label className="field-group narrow-form">
         <span>Their time zone</span>
         <select value={client.timezone} onChange={(e) => update.mutate({ timezone: e.target.value })}>

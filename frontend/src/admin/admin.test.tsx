@@ -4,6 +4,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { AdminStep, Client, OnboardingDetail } from '../api/types'
 import { mockFetch, renderRoute } from '../test/helpers'
 import OnboardingDetailPage from './OnboardingDetail'
+import OnboardingFollowUpPage from './OnboardingFollowUpPage'
 import StepResponse from './StepResponse'
 import TemplatesPage from './TemplatesPage'
 
@@ -110,7 +111,7 @@ const panels = {
 
 describe('OnboardingDetail', () => {
   const client: Client = {
-    id: 'cl1', name: 'Acme Plumbing', kind: 'trades', status: 'active', notes: '', timezone: 'America/New_York', created_at: '2026-11-01T00:00:00Z',
+    id: 'cl1', name: 'Acme Plumbing', kind: 'trades', status: 'active', notes: '', timezone: 'America/New_York', created_at: '2026-11-01T00:00:00Z', paying_since: null,
     contacts: [{ id: 'c1', client_id: 'cl1', name: 'Pat Owner', email: '', phone: '', role: 'owner', sms_consent: false, sms_consent_source: '' }],
   }
   const draft: OnboardingDetail = {
@@ -156,7 +157,7 @@ describe('OnboardingDetail', () => {
       { id: 'l3', contact_id: 'c1', contact_name: 'Pat Owner', expires_at: '2026-12-07T00:00:00Z', revoked_at: '2026-11-02T00:00:00Z', last_used_at: null, usable: false },
     ]
     mockFetch({ 'GET /clients': { body: [client] }, 'GET /onboardings/o1': { body: { ...draft, status: 'active' } }, 'GET /onboardings/o1/links': { body: links }, ...panels })
-    at()
+    at(<OnboardingFollowUpPage />) // links live on the Links & follow-up tab
     const panel = await screen.findByRole('region', { name: 'Client links' })
     expect(await within(panel).findByText(/Works/)).toBeInTheDocument()
     expect(within(panel).getByText(/Expired/)).toBeInTheDocument()
@@ -172,7 +173,7 @@ describe('OnboardingDetail', () => {
       'GET /clients': { body: [client] }, 'GET /onboardings/o1': { body: { ...draft, status: 'active' } }, 'GET /onboardings/o1/links': { body: [link] }, ...panels,
       'POST /onboardings/o1/links/l1/revoke': { body: { ...link, revoked_at: '2026-11-07T00:00:00Z', usable: false } },
     })
-    at()
+    at(<OnboardingFollowUpPage />) // links live on the Links & follow-up tab
     await userEvent.click(await screen.findByRole('button', { name: 'Revoke' }))
     expect(calls.some((c) => c.path.endsWith('/revoke'))).toBe(false)
     await userEvent.click(screen.getByRole('button', { name: 'Revoke' }))

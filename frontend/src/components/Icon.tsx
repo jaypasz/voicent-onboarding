@@ -5,6 +5,7 @@ const PATHS: Record<string, string> = {
   users: 'M16 19v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M9 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6M22 19v-1a4 4 0 0 0-3-3.9M16 4.1a3 3 0 0 1 0 5.8',
   layers: 'M12 3 2 8l10 5 10-5-10-5M2 13l10 5 10-5M2 18l10 5 10-5',
   menu: 'M4 6h16M4 12h16M4 18h16',
+  settings: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6',
   close: 'M6 6l12 12M18 6 6 18',
   collapse: 'M15 6l-6 6 6 6',
   expand: 'M9 6l6 6-6 6',
