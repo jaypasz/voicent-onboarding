@@ -75,7 +75,7 @@ export function PortalScreen({ view, onChanged, preview = false }: { view: Porta
         </header>
         {view.status === 'paused' && <Banner kind="warn">This onboarding is paused. You can read everything, but changes are switched off until we resume it.</Banner>}
         {view.status === 'completed' && <Banner kind="ok">This onboarding is complete. Thank you!</Banner>}
-        {view.layout === 'focus' ? <FocusLayout view={view} onChanged={onChanged} /> : <ChecklistLayout view={view} onChanged={onChanged} />}
+        {view.layout === 'focus' ? <FocusLayout view={view} onChanged={onChanged} preview={preview} /> : <ChecklistLayout view={view} onChanged={onChanged} preview={preview} />}
       </main>
     </BrandName.Provider>
   )

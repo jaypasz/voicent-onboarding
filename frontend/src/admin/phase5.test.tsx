@@ -58,6 +58,19 @@ describe('client preview', () => {
     await userEvent.selectOptions(screen.getByLabelText('See it as'), 'c2')
     await waitFor(() => expect(calls.some((c) => c.path === '/onboardings/o1/preview?contact_id=c2')).toBe(true))
   })
+
+  test('a focus-layout preview opens on the first step still waiting, as the real portal would, with nothing to save', async () => {
+    const steps = [
+      step({ key: 'done1', title: 'Business details', status: 'done', can_write: false }),
+      step({ key: 'todo', title: 'Upload your logo', status: 'pending', can_write: false }),
+    ]
+    mockFetch({ 'GET /onboardings/o1/preview': { body: { ...pv().body, layout: 'focus', status: 'active', steps } } })
+    renderRoute(<OnboardingPreviewPage />, '/onboardings/:id/preview', '/onboardings/o1/preview')
+    const frame = await screen.findByRole('region', { name: 'Client preview' })
+    expect(await within(frame).findByRole('heading', { name: /Upload your logo/ })).toBeInTheDocument()
+    expect(within(frame).queryByText(/everything we need from you/)).toBeNull()
+    expect(within(frame).getByRole('note')).toHaveTextContent('You can read this step here.')
+  })
 })
 
 describe('Settings', () => {

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { PortalStep, PortalView } from '../api/types'
 import { StepBadge } from '../components/StatusBadge'
 import { dueLabel } from '../lib/format'
+import { isOpen as waitsOnContact } from './FocusLayout'
 import StepPanel from './StepPanel'
 
 function groups(view: PortalView): { key: string; title: string; steps: PortalStep[] }[] {
@@ -12,8 +13,8 @@ function groups(view: PortalView): { key: string; title: string; steps: PortalSt
 }
 
 /** Everything on one page: sections, who each step is for, what is due. For an agency or MSP with several people involved. */
-export default function ChecklistLayout({ view, onChanged }: { view: PortalView; onChanged: () => Promise<unknown> }) {
-  const firstOpen = view.steps.find((s) => s.can_write && s.status !== 'done' && s.status !== 'skipped')?.key
+export default function ChecklistLayout({ view, onChanged, preview = false }: { view: PortalView; onChanged: () => Promise<unknown>; preview?: boolean }) {
+  const firstOpen = view.steps.find((s) => waitsOnContact(s, preview))?.key
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(firstOpen ? [firstOpen] : []))
   const toggle = (k: string) => setExpanded((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n })
 
