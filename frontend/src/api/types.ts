@@ -1,3 +1,4 @@
+import type { TemplateDoc } from '../builder/doc'
 export type StepStatus = 'pending' | 'in_progress' | 'done' | 'skipped'
 export type OnboardingStatus = 'draft' | 'active' | 'paused' | 'completed' | 'archived'
 export type Layout = 'focus' | 'checklist'
@@ -96,14 +97,7 @@ export interface TemplateSummary {
 }
 
 export interface TemplateDetail extends TemplateSummary {
-  document: {
-    name: string
-    slug: string
-    layout: Layout
-    description: string
-    sections: { key: string; title: string }[]
-    steps: { key: string; type: string; title: string; section: string; visibility: string }[]
-  }
+  document: TemplateDoc
   versions: number[]
   new_version?: boolean
 }
@@ -219,4 +213,16 @@ export interface ProvisionStatus {
   error: string
   log: { at: string; status: string; detail: string }[]
   result?: { ok: boolean; state: string; message: string }
+}
+
+/** An onboarding's own copy of its template, for the step builder. */
+export interface OnboardingDocument {
+  document: TemplateDoc
+  editable: boolean
+  locked: string[]
+}
+
+export interface TemplateCheck {
+  ok: boolean
+  problems: string[]
 }

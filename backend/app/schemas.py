@@ -95,6 +95,14 @@ class OnboardingIn(BaseModel):
     template_id: str
     title: str = Field(default="", max_length=200)
     version: int | None = Field(default=None, ge=1)
+    # A customised copy for this client: replaces the template's sections and steps. Leave both out to use the template as is.
+    sections: list[Any] | None = Field(default=None, max_length=20)
+    steps: list[Any] | None = Field(default=None, max_length=100)
+
+
+class OnboardingStepsIn(BaseModel):
+    sections: list[Any] = Field(default_factory=list, max_length=20)
+    steps: list[Any] = Field(max_length=100)
 
 
 class StepAnswerIn(BaseModel):

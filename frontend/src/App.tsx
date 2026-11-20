@@ -5,7 +5,9 @@ import ClientDetail from './admin/ClientDetail'
 import ClientsPage from './admin/ClientsPage'
 import NewOnboardingPage from './admin/NewOnboardingPage'
 import OnboardingDetail from './admin/OnboardingDetail'
+import OnboardingStepsPage from './admin/OnboardingStepsPage'
 import OnboardingsPage from './admin/OnboardingsPage'
+import TemplateBuilderPage from './admin/TemplateBuilderPage'
 import TemplatesPage from './admin/TemplatesPage'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import Login from './auth/Login'
@@ -28,9 +30,12 @@ export default function App() {
           <Route element={<AuthProvider><AdminGate /></AuthProvider>}>
             <Route index element={<OnboardingsPage />} />
             <Route path="onboardings/:id" element={<OnboardingDetail />} />
+            <Route path="onboardings/:id/steps" element={<OnboardingStepsPage />} />
             <Route path="clients" element={<ClientsPage />} />
             <Route path="clients/:id" element={<ClientDetail />} />
             <Route path="templates" element={<TemplatesPage />} />
+            <Route path="templates/new" element={<TemplateBuilderPage key="new" />} />
+            <Route path="templates/:id/edit" element={<TemplateBuilderPage key="edit" />} />
             <Route path="new" element={<NewOnboardingPage />} />
             <Route path="*" element={<main className="narrow"><h1>Not found</h1></main>} />
           </Route>
