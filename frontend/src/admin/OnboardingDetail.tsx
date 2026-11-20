@@ -1,10 +1,11 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router'
 import {
-  useAdminComment, useAnswerStep, useClients, useOnboarding, useOnboardingAction, useSend, useStepAction,
+  useAdminComment, useAnswerStep, useSetOwner, useSetStepFollower, useTeam, useClients, useOnboarding, useOnboardingAction, useSend, useStepAction,
 } from '../api/admin'
 import { ApiError } from '../api/http'
-import type { AdminStep, Contact, LinkInfo } from '../api/types'
+import type { AdminStep, Contact, LinkInfo, TeamMember } from '../api/types'
+import { memberLabel } from '../lib/team'
 import { Banner } from '../components/Banner'
 import { LoadError } from '../components/LoadError'
 import { ProgressBar } from '../components/ProgressBar'
@@ -17,7 +18,20 @@ function errText(e: unknown): string {
   return e instanceof ApiError ? [e.message, ...e.problems].join(' ') : 'That did not work.'
 }
 
-function AdminStepCard({ id, step, contact }: { id: string; step: AdminStep; contact?: Contact }) {
+function TeamSelect({ label, value, members, onChange, disabled }: { label: string; value: string | null | undefined; members: TeamMember[]; onChange: (id: string | null) => void; disabled?: boolean }) {
+  return (
+    <label className="field-group"><span>{label}</span>
+      <select value={value ?? ''} disabled={disabled} onChange={(e) => onChange(e.target.value || null)}>
+        <option value="">Nobody</option>
+        {members.map((m) => <option key={m.id} value={m.id}>{memberLabel(m)}{m.is_you ? ' (you)' : ''}</option>)}
+      </select>
+    </label>
+  )
+}
+
+function AdminStepCard({ id, step, contact, members }: { id: string; step: AdminStep; contact?: Contact; members: TeamMember[] }) {
+  const follower = useSetStepFollower(id)
+  const ours = members.find((m) => m.id === step.team_assignee_id)
   const action = useStepAction(id)
   const answer = useAnswerStep(id)
   const comment = useAdminComment(id)
@@ -44,6 +58,7 @@ function AdminStepCard({ id, step, contact }: { id: string; step: AdminStep; con
           <span className="due">{step.type.replace('_', ' ')}</span>
           {step.visibility === 'internal' && <span className="badge">🔒 Internal. Never shown to the client</span>}
           {contact && <span className="due">For {contact.name}</span>}
+          {ours && <span className="due">Ours: {memberLabel(ours)}</span>}
           {due && <span className={due.overdue ? 'due due-overdue' : 'due'}>{due.overdue ? '⚠ ' : ''}{due.text}</span>}
         </span>
         <span aria-hidden="true" className="chev">{open ? '▾' : '▸'}</span>
@@ -51,6 +66,10 @@ function AdminStepCard({ id, step, contact }: { id: string; step: AdminStep; con
       {open && (
         <div className="step-panel">
           {error && <Banner kind="error">{error}</Banner>}
+          {members.length > 0 && (
+            <TeamSelect label="Followed up by (our side)" value={step.team_assignee_id} members={members} disabled={follower.isPending}
+              onChange={(member_id) => void run(() => follower.mutateAsync({ key: step.key, member_id }))} />
+          )}
           {step.type === 'internal_task' && (step.config.checklist ?? []).length > 0 && (
             <ul>{(step.config.checklist as string[]).map((c) => <li key={c}>{c}</li>)}</ul>
           )}
@@ -98,6 +117,8 @@ export default function OnboardingDetail() {
   const clients = useClients()
   const act = useOnboardingAction(id)
   const send = useSend(id)
+  const team = useTeam()
+  const owner = useSetOwner(id)
   const [issued, setIssued] = useState<LinkInfo[]>([])
   const [error, setError] = useState<string | null>(null)
 
@@ -106,6 +127,7 @@ export default function OnboardingDetail() {
   const o = ob.data
   const client = clients.data?.find((c) => c.id === o.client_id)
   const contacts = client?.contacts ?? []
+  const members = team.data?.members ?? []
   const run = async (fn: () => Promise<unknown>) => { setError(null); try { await fn() } catch (e) { setError(errText(e)) } }
 
   const sections: { key: string; steps: AdminStep[] }[] = []
@@ -119,6 +141,13 @@ export default function OnboardingDetail() {
   return (
     <div className="stack">
       <ProgressBar progress={o.progress} />
+      {members.length > 0 && (
+        <div className="owner-row">
+          <TeamSelect label="Looked after by" value={o.owner_member_id} members={members} disabled={owner.isPending}
+            onChange={(member_id) => void run(() => owner.mutateAsync(member_id))} />
+          <p className="help">They're told when it finishes, when the client goes quiet, and when the client answers a step nobody else follows up.</p>
+        </div>
+      )}
       {error && <Banner kind="error">{error}</Banner>}
       <div className="row wrap">
         {o.status === 'draft' && (
@@ -140,7 +169,7 @@ export default function OnboardingDetail() {
       {sections.map((g, i) => (
         <section key={`${g.key}-${i}`} className="section" aria-label={pretty(g.key)}>
           <h2>{pretty(g.key)}</h2>
-          <ul className="steps">{g.steps.map((s) => <AdminStepCard key={s.id} id={id} step={s} contact={contacts.find((c) => c.id === s.assignee_contact_id)} />)}</ul>
+          <ul className="steps">{g.steps.map((s) => <AdminStepCard key={s.id} id={id} step={s} contact={contacts.find((c) => c.id === s.assignee_contact_id)} members={members} />)}</ul>
         </section>
       ))}
 

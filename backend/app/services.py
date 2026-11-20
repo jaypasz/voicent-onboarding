@@ -6,12 +6,13 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
+import re
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import models as m
-from . import branding, provision
+from . import branding, notifications, provision
 from .errors import Conflict, Invalid, NotFound
 from .redact import redact
 from .steps import registry
@@ -75,6 +76,115 @@ def update_org_settings(db: Session, org_id: str, fields: dict) -> m.Org:
         org.brand = branding.clean(fields["brand"])
     db.flush()
     return org
+
+
+# ---------------------------------------------------------------- the team
+
+ROLES = ("admin", "manager", "member", "viewer")
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _member(db: Session, org_id: str, member_id: str) -> m.OrgMember:
+    row = db.scalar(select(m.OrgMember).where(m.OrgMember.id == member_id, m.OrgMember.org_id == org_id))
+    if not row:
+        raise NotFound("That person isn't on this team.")
+    return row
+
+
+def list_team(db: Session, org_id: str) -> tuple[list[m.OrgMember], list[m.OrgInvite]]:
+    members = list(db.scalars(select(m.OrgMember).where(m.OrgMember.org_id == org_id).order_by(m.OrgMember.email)))
+    invites = list(db.scalars(select(m.OrgInvite).where(m.OrgInvite.org_id == org_id, m.OrgInvite.accepted_at.is_(None)).order_by(m.OrgInvite.created_at)))
+    return members, invites
+
+
+def _not_linked(org: m.Org) -> None:
+    if org.voicent_tenant_id:
+        raise Conflict("This team comes from Voicent-App. Add people and change their roles there.")
+
+
+def invite(db: Session, org_id: str, email: str, role: str, by: str) -> m.OrgInvite:
+    org = get_org(db, org_id)
+    _not_linked(org)
+    email = email.strip().lower()
+    if not EMAIL_RE.match(email):
+        raise Invalid("That isn't an email address.")
+    if role not in ROLES:
+        raise Invalid(f"Role must be one of {', '.join(ROLES)}.")
+    if db.scalar(select(m.OrgMember.id).where(m.OrgMember.org_id == org_id, func.lower(m.OrgMember.email) == email)):
+        raise Conflict("That person is already on the team.")
+    row = db.scalar(select(m.OrgInvite).where(m.OrgInvite.org_id == org_id, m.OrgInvite.email == email))
+    if row is None:
+        row = m.OrgInvite(org_id=org_id, email=email)
+        db.add(row)
+    row.role, row.invited_by, row.accepted_at = role, by[:200], None
+    db.flush()
+    return row
+
+
+def cancel_invite(db: Session, org_id: str, invite_id: str) -> None:
+    row = db.scalar(select(m.OrgInvite).where(m.OrgInvite.id == invite_id, m.OrgInvite.org_id == org_id))
+    if not row:
+        raise NotFound("Invite not found.")
+    db.delete(row)
+    db.flush()
+
+
+def _admins_left(db: Session, org_id: str, without: str) -> int:
+    return len(list(db.scalars(select(m.OrgMember.id).where(m.OrgMember.org_id == org_id, m.OrgMember.role == "admin", m.OrgMember.id != without))))
+
+
+def change_member(db: Session, org_id: str, member_id: str, *, role: str | None = None, remove: bool = False) -> m.OrgMember | None:
+    """Roles of people copied from Voicent-App are set there. The last admin can't be removed or demoted."""
+    org = get_org(db, org_id)
+    row = _member(db, org_id, member_id)
+    if row.source == "voicent" or org.voicent_tenant_id:
+        raise Conflict("This person's role comes from Voicent-App. Change it there.")
+    if (remove or (role and role != "admin")) and row.role == "admin" and _admins_left(db, org_id, row.id) == 0:
+        raise Conflict("The team needs at least one admin.")
+    if remove:
+        db.delete(row)
+        db.flush()
+        return None
+    if role is not None:
+        if role not in ROLES:
+            raise Invalid(f"Role must be one of {', '.join(ROLES)}.")
+        row.role = role
+    db.flush()
+    return row
+
+
+def update_me(db: Session, org_id: str, member_id: str | None, *, notify_email: bool | None = None, name: str | None = None) -> m.OrgMember:
+    if not member_id:
+        raise Conflict("You aren't on this organization's team, so there is nothing of yours to change here.")
+    row = _member(db, org_id, member_id)
+    if notify_email is not None:
+        row.notify_email = notify_email
+    if name is not None:
+        row.name = redact(name.strip())[:200]
+    db.flush()
+    return row
+
+
+def set_onboarding_owner(db: Session, org_id: str, onboarding_id: str, member_id: str | None, by_member_id: str | None) -> m.Onboarding:
+    ob = _onboarding(db, org_id, onboarding_id)
+    if member_id is not None:
+        _member(db, org_id, member_id)
+    if ob.owner_member_id != member_id:
+        ob.owner_member_id = member_id
+        notifications.onboarding_owner_set(db, ob, by_member_id)
+    db.flush()
+    return ob
+
+
+def set_step_team_assignee(db: Session, org_id: str, onboarding_id: str, key: str, member_id: str | None, by_member_id: str | None) -> m.Step:
+    ob, step = _step(db, org_id, onboarding_id, key)
+    if member_id is not None:
+        _member(db, org_id, member_id)
+    if step.team_assignee_id != member_id:
+        step.team_assignee_id = member_id
+        notifications.step_assignee_set(db, ob, step, by_member_id)
+    db.flush()
+    return step
 
 
 # ---------------------------------------------------------------- clients and contacts
@@ -266,12 +376,14 @@ def get_onboarding(db: Session, org_id: str, onboarding_id: str) -> m.Onboarding
     return _onboarding(db, org_id, onboarding_id)
 
 
-def list_onboardings(db: Session, org_id: str, status: str | None = None, client_id: str | None = None) -> list[m.Onboarding]:
+def list_onboardings(db: Session, org_id: str, status: str | None = None, client_id: str | None = None, owner_member_id: str | None = None) -> list[m.Onboarding]:
     q = select(m.Onboarding).where(m.Onboarding.org_id == org_id).order_by(m.Onboarding.last_activity_at.desc())
     if status:
         q = q.where(m.Onboarding.status == status)
     if client_id:
         q = q.where(m.Onboarding.client_id == client_id)
+    if owner_member_id:
+        q = q.where(m.Onboarding.owner_member_id == owner_member_id)
     return list(db.scalars(q))
 
 
@@ -293,7 +405,7 @@ def _contacts(db: Session, org_id: str, client_id: str) -> list[m.Contact]:
 
 
 def create_onboarding(db: Session, org_id: str, *, client_id: str, template_id: str, title: str = "", version: int | None = None,
-                      sections: list | None = None, steps: list | None = None) -> m.Onboarding:
+                      sections: list | None = None, steps: list | None = None, owner_member_id: str | None = None) -> m.Onboarding:
     """Copy the template version into the onboarding. Editing the template afterwards changes nothing here.
     With sections or steps, this client gets a customised copy; the template itself is not touched."""
     client = _client(db, org_id, client_id)
@@ -303,7 +415,7 @@ def create_onboarding(db: Session, org_id: str, *, client_id: str, template_id: 
     contacts = _contacts(db, org_id, client.id)
     ob = m.Onboarding(
         org_id=org_id, client_id=client.id, template_version_id=tv.id, title=redact(title.strip()) or f"{doc['name']}: {client.name}",
-        layout=doc["layout"], status="draft", document=doc,
+        layout=doc["layout"], status="draft", document=doc, owner_member_id=owner_member_id,  # whoever makes it looks after it
     )
     db.add(ob)
     db.flush()
@@ -452,6 +564,7 @@ def submit_step(db: Session, org_id: str, onboarding_id: str, key: str, data, *,
     _set_step_status(ob, step, stype.resulting_status(_step_config(ob, key), cleaned))
     if actor_kind == "client":
         ob.attention = None  # they're back, so whatever was worrying us isn't true any more
+        notifications.client_answered(db, ob, step, submitted_by)
     _after_change(db, ob)
     return step
 
@@ -517,6 +630,7 @@ def _after_change(db: Session, ob: m.Onboarding) -> None:
     if ob.status == "active" and ob.steps and all(s.status in ("done", "skipped") for s in ob.steps):
         ob.status, ob.completed_at = "completed", now()
         provision.queue(ob, ob.completed_at)  # sent after the response by provision.kick, or by the timer
+        notifications.onboarding_completed(db, ob)
     db.flush()
 
 

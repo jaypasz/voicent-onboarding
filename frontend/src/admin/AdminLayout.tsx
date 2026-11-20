@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router'
-import { useMe, useOrgSettings } from '../api/admin'
+import { useMe, useNotifications, useOrgSettings } from '../api/admin'
 import { setAdminOrgGetter } from '../api/http'
 import type { OrgChoice } from '../api/types'
 import { LoadError } from '../components/LoadError'
@@ -15,6 +15,8 @@ const ITEMS = [
   { to: '/new', label: 'New onboarding', icon: 'plus' },
   { to: '/clients', label: 'Clients', icon: 'users' },
   { to: '/templates', label: 'Templates', icon: 'layers' },
+  { to: '/notifications', label: 'Notifications', icon: 'bell' },
+  { to: '/team', label: 'Team', icon: 'team' },
   { to: '/settings', label: 'Settings', icon: 'settings' },
 ]
 
@@ -46,6 +48,7 @@ export default function AdminLayout() {
 function Shell({ orgs, orgId, onChoose }: { orgs: OrgChoice[]; orgId: string | null; onChoose: (id: string) => void }) {
   const { email, signOut } = useAuth()
   const settings = useOrgSettings(!!orgId)
+  const unread = useNotifications().data?.unread ?? 0
   const brand = settings.data?.brand
   const logo = safeLogo(brand?.logo_url)
   useEffect(() => { document.title = brand?.name ? `${brand.name} · Onboarding` : 'Onboarding' }, [brand?.name])
@@ -96,7 +99,8 @@ function Shell({ orgs, orgId, onChoose }: { orgs: OrgChoice[]; orgId: string | n
             {ITEMS.map((i) => (
               <li key={i.to}>
                 <NavLink to={i.to} end={i.end} title={collapsed ? i.label : undefined}>
-                  <Icon name={i.icon} /><span className="nav-label">{i.label}</span>
+                  <span className="nav-icon"><Icon name={i.icon} />{i.to === '/notifications' && unread > 0 && <span className="count" aria-hidden="true">{unread > 99 ? '99+' : unread}</span>}</span>
+                  <span className="nav-label">{i.label}{i.to === '/notifications' && unread > 0 && <span className="sr-only">, {unread} new</span>}</span>
                 </NavLink>
               </li>
             ))}

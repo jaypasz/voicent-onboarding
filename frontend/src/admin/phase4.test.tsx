@@ -182,7 +182,7 @@ describe('the list and the detail page flag an onboarding that needs you', () =>
   test('each reason is a word as well as a badge', async () => {
     mockFetch({
       'GET /onboardings': { body: [summary({ id: 'a', title: 'Quiet one', attention: 'nudges_exhausted' }), summary({ id: 'b', title: 'Lost one', attention: 'unreachable' }), summary({ id: 'c', title: 'Fine one' })] },
-      'GET /clients': { body: [client()] },
+      'GET /clients': { body: [client()] }, 'GET /team': { body: { linked: false, in_sync: true, can_manage: true, me: null, members: [], invites: [] } },
     })
     renderRoute(<OnboardingsPage />, '/', '/')
     expect(await screen.findByText(/Needs you: no reply to the reminders/)).toBeInTheDocument()
@@ -194,6 +194,7 @@ describe('the list and the detail page flag an onboarding that needs you', () =>
     mockFetch({
       'GET /onboardings/o1': { body: ob({ attention: 'unreachable' }) }, 'GET /clients': { body: [client()] }, 'GET /onboardings/o1/links': { body: [] },
       'GET /features': { body: features() }, 'GET /onboardings/o1/nudges': { body: [] }, 'GET /onboardings/o1/sync': state(), 'GET /onboardings/o1/provision': { body: notWanted },
+      'GET /team': { body: { linked: false, in_sync: true, can_manage: true, me: null, members: [], invites: [] } },
     })
     renderRoute(<OnboardingDetailPage />, '/onboardings/:id', '/onboardings/o1')
     const banner = (await screen.findByText(/no email address or consented phone number to reach this client/)).closest('.banner')!

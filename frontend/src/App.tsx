@@ -10,7 +10,9 @@ import OnboardingLayout from './admin/OnboardingLayout'
 import OnboardingPreviewPage from './admin/OnboardingPreviewPage'
 import OnboardingStepsPage from './admin/OnboardingStepsPage'
 import OnboardingsPage from './admin/OnboardingsPage'
+import NotificationsPage from './admin/NotificationsPage'
 import SettingsPage from './admin/SettingsPage'
+import TeamPage from './admin/TeamPage'
 import TemplateBuilderPage from './admin/TemplateBuilderPage'
 import TemplatesPage from './admin/TemplatesPage'
 import { AuthProvider, useAuth } from './auth/AuthContext'
@@ -46,6 +48,8 @@ export default function App() {
             <Route path="templates/:id/edit" element={<TemplateBuilderPage key="edit" />} />
             <Route path="new" element={<NewOnboardingPage />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="team" element={<TeamPage />} />
+            <Route path="notifications" element={<NotificationsPage />} />
             <Route path="*" element={<main className="narrow"><h1>Not found</h1></main>} />
           </Route>
         </Routes>

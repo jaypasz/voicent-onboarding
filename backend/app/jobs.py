@@ -12,7 +12,7 @@ import threading
 
 from sqlalchemy.orm import sessionmaker
 
-from . import aios_sync, nudges, provision
+from . import aios_sync, notifications, nudges, provision
 from .aios import AiosClient
 from .config import Settings
 from .notify import Notifier
@@ -41,6 +41,7 @@ def run_once(sm: sessionmaker, settings: Settings, notifier: Notifier | None = N
     except Exception:  # noqa: BLE001
         log.error("Provisioning job failed", exc_info=True)
         out["provisioning"] = {"error": True}
+    out["notifications"] = notifications.send_pending(sm, settings, notifier or Notifier(settings))  # never raises
     return out
 
 

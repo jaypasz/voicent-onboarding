@@ -17,7 +17,7 @@ const settings = (over = {}) => ({
 })
 
 function renderAt(path = '/', orgs = [ORG]) {
-  const fetched = mockFetch({ 'GET /me': { body: { id: 'u', email: 'jay@x.test', kind: 'user', superuser: false, orgs } }, 'GET /org': settings() })
+  const fetched = mockFetch({ 'GET /me': { body: { id: 'u', email: 'jay@x.test', kind: 'user', superuser: false, orgs } }, 'GET /org': settings(), 'GET /notifications': { body: { unread: 3, items: [] } } })
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
     <MemoryRouter initialEntries={[path]}>
@@ -80,6 +80,7 @@ describe('the left menu', () => {
     expect(screen.queryByText(/Voicent/)).toBeNull()
     expect(calls.find((c) => c.path === '/org')!.headers['X-Org-Id']).toBe('org-a')
     expect(screen.queryByRole('combobox', { name: 'Organization' })).toBeNull() // only one to work in
+    expect(await screen.findByRole('link', { name: 'Notifications, 3 new' })).toBeInTheDocument()
   })
 
   test('with several orgs (a Voicent superuser) the choice is offered and remembered', async () => {

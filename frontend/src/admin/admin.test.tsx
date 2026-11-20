@@ -103,6 +103,7 @@ describe('TemplatesPage', () => {
 })
 
 const panels = {
+  'GET /team': { body: { linked: false, in_sync: true, can_manage: true, me: null, members: [], invites: [] } },
   'GET /features': { body: { sms: true, email: true, reminders: true, aios_sync: true, uploads: false, jobs: true, provisioning: false } },
   'GET /onboardings/o1/nudges': { body: [] },
   'GET /onboardings/o1/sync': { body: { enabled: true, state: 'synced', project_id: 'onb-o1', log: [] } },

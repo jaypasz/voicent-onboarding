@@ -240,3 +240,9 @@ input[type='checkbox'], input[type='radio'] { width: 22px; height: 22px; vertica
 .brand-sample { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; padding: 0.75rem 1rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
 .org-switch select { min-height: 44px; }
 .admin-shell.is-collapsed .org-switch { display: none; }
+
+/* ---- notifications */
+.nav-icon { position: relative; display: inline-grid; }
+.count { position: absolute; top: -8px; right: -12px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px; background: var(--err); color: #fff; font-size: 0.7rem; font-weight: 700; display: grid; place-items: center; }
+.notification.is-unread { border-left: 4px solid var(--accent); }
+.owner-row { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: flex-end; }

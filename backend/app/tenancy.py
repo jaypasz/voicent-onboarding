@@ -70,7 +70,56 @@ def sync_person(db: Session, auth_id: str, email: str, person: Person | None) ->
     db.flush()
 
 
+def sync_team(db: Session, directory, org: m.Org) -> bool:
+    """Bring a linked org's whole team over from Voicent-App, so people can be assigned before they first sign in. Copies
+    are added and updated, and removed when Voicent-App no longer lists them. Returns False if Voicent-App couldn't be asked
+    (the last copy stays)."""
+    if directory is None or not org.voicent_tenant_id:
+        return True
+    try:
+        people, fresh = directory.team(org.voicent_tenant_id)
+    except DirectoryError as e:
+        log.warning("Voicent tenancy: %s Showing the team as last copied.", e)
+        return False
+    if not fresh:
+        return True
+    rows = {r.auth_user_id: r for r in db.scalars(select(m.OrgMember).where(m.OrgMember.org_id == org.id))}
+    listed = set()
+    for p in people:
+        listed.add(p.auth_id)
+        row = rows.get(p.auth_id)
+        if row is None:
+            db.add(m.OrgMember(org_id=org.id, auth_user_id=p.auth_id, email=p.email, role=p.role, source="voicent"))
+        elif row.source == "voicent":
+            row.role = p.role
+            if p.email:
+                row.email = p.email
+    for aid, row in rows.items():
+        if row.source == "voicent" and aid not in listed:
+            db.delete(row)
+    db.flush()
+    return True
+
+
+def accept_invites(db: Session, auth_id: str, email: str, now) -> None:
+    """Someone signed in with an address that was invited: they join those orgs with the role they were invited with.
+    Supabase only issues a session for a confirmed address, so the address in the token is theirs."""
+    if "@" not in email:
+        return
+    invites = list(db.scalars(select(m.OrgInvite).where(m.OrgInvite.email == email.strip().lower(), m.OrgInvite.accepted_at.is_(None))))
+    for inv in invites:
+        exists = db.scalar(select(m.OrgMember.id).where(m.OrgMember.org_id == inv.org_id, m.OrgMember.auth_user_id == auth_id))
+        if not exists:
+            db.add(m.OrgMember(org_id=inv.org_id, auth_user_id=auth_id, email=email[:200], role=inv.role if inv.role in RANK else "member", source="local"))
+        inv.accepted_at = now
+    if invites:
+        db.flush()
+
+
 def access_for(db: Session, directory, auth_id: str, email: str) -> Access:
+    import datetime as dt
+
+    accept_invites(db, auth_id, email, dt.datetime.now(dt.timezone.utc))
     superuser = False
     if directory is not None:
         try:
