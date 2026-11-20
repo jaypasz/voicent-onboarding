@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from .. import aios_sync, magic_link, portal, provision
+from .. import notifications, aios_sync, magic_link, portal, provision
 from ..deps import Db, PortalCtx, Session, limit_writes
 
 router = APIRouter(prefix="/portal", tags=["portal"])
@@ -62,8 +62,8 @@ def refresh(request: Request, ctx=PortalCtx):
 
 
 @router.get("/onboarding")
-def get_onboarding(db: Session = Db, ctx=PortalCtx):
-    return portal.onboarding_view(db, ctx)
+def get_onboarding(request: Request, db: Session = Db, ctx=PortalCtx):
+    return portal.onboarding_view(db, ctx, request.app.state.settings)
 
 
 @router.put("/steps/{key}")
@@ -71,6 +71,7 @@ def submit(key: str, body: AnswerIn, request: Request, background: BackgroundTas
     limit_writes(request, ctx)
     aios_sync.kick(request, background, ctx.link.org_id, ctx.onboarding.id)  # runs after the answer is saved and the response has gone
     provision.kick(request, background, ctx.link.org_id, ctx.onboarding.id)  # if that answer finished the onboarding
+    notifications.kick(request, background)  # tell whoever follows the step up
     return portal.submit(db, ctx, key, body.data, request.app.state.storage)
 
 

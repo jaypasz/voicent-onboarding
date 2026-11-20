@@ -3,10 +3,12 @@ import { ApiError } from '../api/http'
 import type { Comment } from '../api/types'
 import { Banner } from '../components/Banner'
 import { timeAgo } from '../lib/format'
+import { useTeamName } from './brand'
 import { usePortal } from './session'
 
 export default function Comments({ stepKey, comments, canWrite, onChanged }: { stepKey: string; comments: Comment[]; canWrite: boolean; onChanged: () => Promise<unknown> }) {
   const { call } = usePortal()
+  const team = useTeamName()
   const [open, setOpen] = useState(false)
   const [body, setBody] = useState('')
   const [busy, setBusy] = useState(false)
@@ -36,7 +38,7 @@ export default function Comments({ stepKey, comments, canWrite, onChanged }: { s
           {comments.map((c) => (
             <li key={c.id} className={`comment comment-${c.author_kind}`}>
               <div className="comment-meta">
-                {c.author_kind === 'admin' ? 'Voicent' : c.author_label} · {timeAgo(c.created_at)}
+                {c.author_kind === 'admin' ? team : c.author_label} · {timeAgo(c.created_at)}
               </div>
               <div>{c.body}</div>
             </li>

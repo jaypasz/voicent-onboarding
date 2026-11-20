@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router'
-import { useOnboarding, useOnboardingDocument, useSaveOnboardingSteps } from '../api/admin'
+import { useParams } from 'react-router'
+import { useOnboardingDocument, useSaveOnboardingSteps } from '../api/admin'
 import { ApiError } from '../api/http'
 import SaveAsTemplate from '../builder/SaveAsTemplate'
 import StepsBuilder, { type BuilderValue } from '../builder/StepsBuilder'
@@ -11,7 +11,6 @@ import { LoadError } from '../components/LoadError'
 /** One client's steps. A draft can be changed freely; after sending, the steps can only be saved as a template. */
 export default function OnboardingStepsPage() {
   const { id = '' } = useParams()
-  const ob = useOnboarding(id)
   const doc = useOnboardingDocument(id)
   const save = useSaveOnboardingSteps(id)
   const [value, setValue] = useState<BuilderValue | null>(null)
@@ -23,8 +22,7 @@ export default function OnboardingStepsPage() {
     if (doc.data && !value) setValue({ sections: doc.data.document.sections, steps: prepare(doc.data.document.steps) })
   }, [doc.data, value])
 
-  const back = <p><Link to={`/onboardings/${id}`}>← Back to the onboarding</Link></p>
-  if (doc.isError) return <div className="stack"><LoadError error={doc.error} what="this onboarding's steps" />{back}</div>
+  if (doc.isError) return <LoadError error={doc.error} what="this onboarding's steps" />
   if (!doc.data || !value) return <p>Loading…</p>
   const d = doc.data
 
@@ -43,8 +41,6 @@ export default function OnboardingStepsPage() {
 
   return (
     <div className="stack">
-      {back}
-      <h1>Steps for {ob.data?.title ?? 'this onboarding'}</h1>
       {d.editable ? (
         <>
           <p className="help">These changes are for this client only. The template “{d.document.name}” stays as it is.</p>

@@ -177,12 +177,12 @@ describe('AiosPanel', () => {
 
 describe('the list and the detail page flag an onboarding that needs you', () => {
   const summary = (over: Partial<OnboardingSummary>): OnboardingSummary => ({ ...ob(), ...over })
-  const client = (over: Partial<Client> = {}): Client => ({ id: 'cl1', name: 'Acme', kind: 'trades', status: 'active', notes: '', timezone: 'America/New_York', created_at: '2026-11-01T00:00:00Z', contacts: [], ...over })
+  const client = (over: Partial<Client> = {}): Client => ({ id: 'cl1', name: 'Acme', kind: 'trades', status: 'active', notes: '', timezone: 'America/New_York', created_at: '2026-11-01T00:00:00Z', paying_since: null, contacts: [], ...over })
 
   test('each reason is a word as well as a badge', async () => {
     mockFetch({
       'GET /onboardings': { body: [summary({ id: 'a', title: 'Quiet one', attention: 'nudges_exhausted' }), summary({ id: 'b', title: 'Lost one', attention: 'unreachable' }), summary({ id: 'c', title: 'Fine one' })] },
-      'GET /clients': { body: [client()] },
+      'GET /clients': { body: [client()] }, 'GET /team': { body: { linked: false, in_sync: true, can_manage: true, me: null, members: [], invites: [] } },
     })
     renderRoute(<OnboardingsPage />, '/', '/')
     expect(await screen.findByText(/Needs you: no reply to the reminders/)).toBeInTheDocument()
@@ -194,6 +194,7 @@ describe('the list and the detail page flag an onboarding that needs you', () =>
     mockFetch({
       'GET /onboardings/o1': { body: ob({ attention: 'unreachable' }) }, 'GET /clients': { body: [client()] }, 'GET /onboardings/o1/links': { body: [] },
       'GET /features': { body: features() }, 'GET /onboardings/o1/nudges': { body: [] }, 'GET /onboardings/o1/sync': state(), 'GET /onboardings/o1/provision': { body: notWanted },
+      'GET /team': { body: { linked: false, in_sync: true, can_manage: true, me: null, members: [], invites: [] } },
     })
     renderRoute(<OnboardingDetailPage />, '/onboardings/:id', '/onboardings/o1')
     const banner = (await screen.findByText(/no email address or consented phone number to reach this client/)).closest('.banner')!
@@ -204,7 +205,7 @@ describe('the list and the detail page flag an onboarding that needs you', () =>
 })
 
 describe('ClientDetail time zone', () => {
-  const client: Client = { id: 'cl1', name: 'Acme', kind: 'trades', status: 'active', notes: '', timezone: 'America/Chicago', created_at: '2026-11-01T00:00:00Z', contacts: [] }
+  const client: Client = { id: 'cl1', name: 'Acme', kind: 'trades', status: 'active', notes: '', timezone: 'America/Chicago', created_at: '2026-11-01T00:00:00Z', paying_since: null, contacts: [] }
 
   test('shows the current zone and saves a new one', async () => {
     const { calls } = mockFetch({ 'GET /clients': { body: [client] }, 'GET /onboardings': { body: [] }, 'PATCH /clients/cl1': { body: { ...client, timezone: 'America/Denver' } } })
@@ -256,7 +257,7 @@ describe('VoicentPanel', () => {
   test('while the client is still going there is nothing to send yet', async () => {
     mockFetch({ 'GET /onboardings/o1/provision': prov() })
     renderRoute(<VoicentPanel ob={ob()} />, '/', '/')
-    expect(await screen.findByText(/When the client has finished every step/)).toBeInTheDocument()
+    expect(await screen.findByText(/Once the client has finished every step and is a paying customer/)).toBeInTheDocument()
     expect(screen.queryByRole('button')).toBeNull()
   })
 
@@ -284,7 +285,7 @@ describe('VoicentPanel', () => {
 test('the onboardings list flags a workspace request that did not go through, in words', async () => {
   mockFetch({
     'GET /onboardings': { body: [{ ...ob({ id: 'a', title: 'Stuck one', status: 'completed' }), provision_state: 'failed' }, { ...ob({ id: 'b', title: 'Fine one' }) }] },
-    'GET /clients': { body: [{ id: 'cl1', name: 'Acme', kind: 'trades', status: 'active', notes: '', timezone: 'America/New_York', created_at: '2026-11-01T00:00:00Z', contacts: [] }] },
+    'GET /clients': { body: [{ id: 'cl1', name: 'Acme', kind: 'trades', status: 'active', notes: '', timezone: 'America/New_York', created_at: '2026-11-01T00:00:00Z', paying_since: null, contacts: [] }] },
   })
   renderRoute(<OnboardingsPage />, '/', '/')
   const stuck = (await screen.findByText('Stuck one')).closest('li')!
