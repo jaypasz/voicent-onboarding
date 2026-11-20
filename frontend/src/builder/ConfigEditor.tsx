@@ -177,10 +177,12 @@ function ConnectConfig({ config, onChange }: Props) {
 }
 
 function InternalTaskConfig({ config, onChange }: Props) {
+  // like the choices box: it keeps exactly what was typed (a new line, a trailing space); the document gets the non-empty lines
+  const [checklistText, setChecklistText] = useState(() => (config.checklist ?? []).join('\n'))
   return (
     <div className="stack">
       <Text label="Notes" area value={config.notes} onChange={(v) => onChange(put(config, 'notes', v))} />
-      <Text label="Checklist, one item per line" area value={(config.checklist ?? []).join('\n')} onChange={(v) => onChange(put(config, 'checklist', lines(v)))} />
+      <Text label="Checklist, one item per line" area value={checklistText} onChange={(v) => { setChecklistText(v); onChange(put(config, 'checklist', lines(v))) }} />
     </div>
   )
 }
