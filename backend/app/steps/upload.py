@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import codecs
+
 from .base import StepType
 
 # Extension -> content type. SVG is deliberately absent: it can carry script.
@@ -9,6 +11,43 @@ ALLOWED_UPLOADS = {
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
+
+SNIFF_BYTES = 4096
+_QUICKTIME_ATOMS = (b"ftyp", b"moov", b"mdat", b"wide", b"free", b"skip", b"pnot")
+
+
+def _is_text(head: bytes) -> bool:
+    if b"\x00" in head:
+        return False
+    try:  # final=False: the sample may end halfway through a multi-byte character
+        codecs.getincrementaldecoder("utf-8")().decode(head, final=False)
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
+def content_matches(ext: str, head: bytes) -> bool:
+    """Whether the first bytes of a file look like the type its name claims. A rough check, not a parser: it stops a
+    file of one kind being passed off as another, which is all the allow-list needs."""
+    if ext == "png":
+        return head.startswith(b"\x89PNG\r\n\x1a\n")
+    if ext in ("jpg", "jpeg"):
+        return head.startswith(b"\xff\xd8\xff")
+    if ext == "gif":
+        return head[:6] in (b"GIF87a", b"GIF89a")
+    if ext == "webp":
+        return head[:4] == b"RIFF" and head[8:12] == b"WEBP"
+    if ext == "pdf":
+        return b"%PDF-" in head[:1024]  # readers allow a little junk before the header
+    if ext == "mp4":
+        return head[4:8] == b"ftyp"
+    if ext == "mov":
+        return head[4:8] in _QUICKTIME_ATOMS
+    if ext in ("docx", "xlsx"):
+        return head.startswith(b"PK\x03\x04")
+    if ext in ("csv", "txt"):
+        return bool(head) and _is_text(head)
+    return False
 
 
 class Upload(StepType):

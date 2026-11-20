@@ -49,7 +49,7 @@ A registry (`app/steps/registry.py`); each type declares its config schema, vali
 
 `POST /api/portal/exchange {token}` swaps a link token (stored only as a SHA-256 hash) for a 30-minute session (HS256, audience `portal`, signed with `PORTAL_SIGNING_KEY`, never the Supabase secret). Then `GET /api/portal/onboarding`, `PUT /api/portal/steps/{key}`, `POST /steps/{key}/comments`, `POST /steps/{key}/upload-url`, `POST /api/portal/refresh`. A client sees client-visible steps only and nothing derived from internal ones (no counts, sections, comments or template document). In the `focus` layout they see only their own and unassigned steps; in `checklist` they see everyone's but can write only their own and unassigned steps.
 
-Uploads: the server checks name, type, size and step limits, then returns a signed Supabase Storage URL; the browser uploads straight to it. An upload answer is accepted only for files that belong to that step and exist in storage.
+Uploads: the server checks name, type, size and step limits, then returns a signed Supabase Storage URL; the browser uploads straight to it. An upload answer is accepted only for files that belong to that step and exist in storage, whose stored content type is the one the step allows for that name, and whose first bytes look like that kind of file (the browser picks the content type when it uploads, so the one declared for the URL proves nothing). The cap on issued URLs per step counts only files in the latest answer and reservations younger than two hours (a signed upload URL's lifetime), so abandoned uploads can't lock a client out.
 
 ## Frontend (phase 3b)
 

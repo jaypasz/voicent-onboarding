@@ -15,6 +15,8 @@ from . import provision
 from .errors import Conflict, Invalid, NotFound
 from .redact import redact
 from .steps import registry
+from .steps.upload import ALLOWED_UPLOADS, SNIFF_BYTES, content_matches
+from .storage import extension, stored_content_type
 from .templates import loader
 
 ONBOARDING_STATUSES = ("draft", "active", "paused", "completed", "archived")
@@ -413,11 +415,32 @@ def _check_uploaded_files(step: m.Step, cleaned: dict, config: dict, storage) ->
         info = storage.info(f.storage_path)
         if info is None:
             raise Invalid(f"'{f.name}' hasn't finished uploading.")
-        size = info.get("size") if isinstance(info, dict) else None
+        info = info if isinstance(info, dict) else {}
+        size = info.get("size")
+        if size is None and isinstance(info.get("metadata"), dict):
+            size = info["metadata"].get("size")
         if isinstance(size, int):
             if size > limit:
                 raise Invalid(f"'{f.name}' is larger than {config.get('max_mb', 10)} MB.")
             f.size = size
+        _check_file_type(f, config, info, storage)
+
+
+def _check_file_type(f: m.File, config: dict, info: dict, storage) -> None:
+    """The type storage recorded and the file's first bytes must both match what the step allows. The browser sets
+    the content type when it uploads, so the type declared when the URL was issued proves nothing on its own."""
+    ext = extension(f.name)
+    expected = ALLOWED_UPLOADS.get(ext)
+    wrong = f"'{f.name}' isn't a {ext or 'supported'} file. Upload it again in the right format."
+    if expected is None or ext not in config.get("accept", []) or expected != f.content_type:
+        raise Invalid(wrong)
+    if stored_content_type(info) != expected:
+        raise Invalid(wrong)
+    head = storage.head(f.storage_path, SNIFF_BYTES)
+    if head is None:
+        raise Invalid(f"'{f.name}' hasn't finished uploading.")
+    if not content_matches(ext, head):
+        raise Invalid(wrong)
 
 
 def complete_step(db: Session, org_id: str, onboarding_id: str, key: str) -> m.Step:

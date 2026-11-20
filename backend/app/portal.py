@@ -5,6 +5,7 @@ document, or any count that would reveal how many internal steps exist.
 """
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
@@ -20,6 +21,9 @@ from .steps import registry
 UNAVAILABLE = "This link isn't available. Ask for a new one."
 VISIBLE_STATUSES = ("active", "paused", "completed")  # a draft or archived onboarding looks like a dead link
 MAX_ISSUED_FACTOR = 4
+# A signed upload URL from Supabase Storage lasts two hours. After that an unused reservation can't be filled any
+# more, so it stops counting against the step's cap.
+RESERVATION_TTL = dt.timedelta(hours=2)
 
 
 @dataclass
@@ -129,6 +133,19 @@ def comment(db: Session, ctx: Ctx, key: str, body: str) -> dict:
     return {"id": c.id, "author_kind": c.author_kind, "author_label": c.author_label, "body": c.body, "created_at": c.created_at}
 
 
+def _aware(t: dt.datetime) -> dt.datetime:
+    return t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)  # SQLite hands timestamps back without a zone
+
+
+def _held_files(step: m.Step) -> int:
+    """Files that still count against the step's cap: the ones in the latest answer, plus reservations whose upload
+    URL could still be used. Abandoned or expired reservations are left out, so they can't lock a client out."""
+    last = step.responses[-1] if step.responses else None
+    kept = set(last.data.get("file_ids", [])) if last and isinstance(last.data, dict) else set()
+    cutoff = m.now() - RESERVATION_TTL
+    return sum(1 for f in step.files if f.id in kept or _aware(f.created_at) > cutoff)
+
+
 def upload_url(db: Session, ctx: Ctx, key: str, *, name: str, size: int, content_type: str, storage: Storage | None) -> dict:
     step = _find(ctx, key)
     _writable(ctx, step)
@@ -138,8 +155,8 @@ def upload_url(db: Session, ctx: Ctx, key: str, *, name: str, size: int, content
         raise UploadsOff("File uploads aren't switched on yet.")
     config = _doc_step(ctx.onboarding, key)["config"]
     check_upload_request(config, name, size, content_type)
-    if len(step.files) >= config.get("max_files", 5) * MAX_ISSUED_FACTOR:  # retries are fine; this only stops abuse
-        raise Invalid("Too many uploads on this step. Ask for help if you're stuck.")
+    if _held_files(step) >= config.get("max_files", 5) * MAX_ISSUED_FACTOR:  # retries are fine; this only stops abuse
+        raise Invalid("Too many uploads on this step. Try again in a couple of hours, or ask for help.")
     path = storage_path(ctx.link.org_id, ctx.onboarding.id, step.id, name)
     target = storage.signed_upload(path)
     f = m.File(org_id=ctx.link.org_id, step_id=step.id, storage_path=path, name=name[:300], size=size, content_type=content_type)

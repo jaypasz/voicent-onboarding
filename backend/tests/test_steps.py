@@ -118,3 +118,38 @@ def test_unimplemented_types_are_known_but_unusable():
 def test_the_registry_lists_six_working_types():
     assert {s.type for s in registry.all_types() if s.implemented} == {"form", "upload", "connect", "book_call", "approval", "internal_task"}
     assert registry.get("nope") is None
+
+
+# ---------------------------------------------------------------- what an upload's first bytes must look like
+
+import pytest  # noqa: E402
+
+from app.steps.upload import ALLOWED_UPLOADS, content_matches  # noqa: E402
+
+GOOD = {
+    "png": b"\x89PNG\r\n\x1a\n....", "jpg": b"\xff\xd8\xff\xe0..", "jpeg": b"\xff\xd8\xff\xe1..", "gif": b"GIF89a..",
+    "webp": b"RIFF\x10\x00\x00\x00WEBPVP8 ", "pdf": b"%PDF-1.4\n", "mp4": b"\x00\x00\x00\x18ftypisom",
+    "mov": b"\x00\x00\x00\x14ftypqt  ", "docx": b"PK\x03\x04\x14\x00", "xlsx": b"PK\x03\x04\x14\x00",
+    "csv": "name,city\nAna,Málaga\n".encode(), "txt": b"hello\n",
+}
+
+
+def test_every_allowed_type_has_a_content_check():
+    assert set(GOOD) == set(ALLOWED_UPLOADS)
+
+
+@pytest.mark.parametrize("ext", sorted(GOOD))
+def test_content_matches_its_own_kind_and_not_others(ext):
+    assert content_matches(ext, GOOD[ext])
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+    if ext not in ("csv", "txt"):  # SVG is text, so only the binary kinds can tell it apart
+        assert not content_matches(ext, svg)
+    assert not content_matches(ext, b"MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00")  # a Windows program
+
+
+def test_text_check():
+    assert not content_matches("txt", b"")
+    assert not content_matches("csv", b"a,b\x00c")
+    assert not content_matches("txt", b"\xff\xfe\x00bad")
+    assert content_matches("txt", "café".encode()[:-1])  # a sample cut halfway through a character is fine
+    assert not content_matches("svg", b"<svg/>")  # not on the allow-list at all
