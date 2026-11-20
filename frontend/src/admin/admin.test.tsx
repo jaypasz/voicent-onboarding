@@ -102,9 +102,10 @@ describe('TemplatesPage', () => {
 })
 
 const panels = {
-  'GET /features': { body: { sms: true, email: true, reminders: true, aios_sync: true, uploads: false, jobs: true } },
+  'GET /features': { body: { sms: true, email: true, reminders: true, aios_sync: true, uploads: false, jobs: true, provisioning: false } },
   'GET /onboardings/o1/nudges': { body: [] },
   'GET /onboardings/o1/sync': { body: { enabled: true, state: 'synced', project_id: 'onb-o1', log: [] } },
+  'GET /onboardings/o1/provision': { body: { enabled: false, wanted: false, state: 'not_wanted', workspace_id: null, attempts: 0, next_attempt_at: null, delivered_at: null, error: '', log: [] } },
 }
 
 describe('OnboardingDetail', () => {
@@ -114,7 +115,7 @@ describe('OnboardingDetail', () => {
   }
   const draft: OnboardingDetail = {
     id: 'o1', client_id: 'cl1', title: 'Kickoff: Acme', layout: 'focus', status: 'draft', started_at: null, completed_at: null,
-    last_activity_at: '2026-11-07T00:00:00Z', nudges_paused: false, attention: null, progress: { done: 0, total: 2 },
+    last_activity_at: '2026-11-07T00:00:00Z', nudges_paused: false, attention: null, provision_state: null, progress: { done: 0, total: 2 },
     steps: [astep({ id: 's1', key: 'basics', title: 'Basics' }), astep({ id: 's2', key: 'build', title: 'Build the agent', type: 'internal_task', visibility: 'internal' })],
   }
   const base = { 'GET /clients': { body: [client] }, 'GET /onboardings/o1/links': { body: [] }, ...panels }

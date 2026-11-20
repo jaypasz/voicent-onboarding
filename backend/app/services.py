@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import models as m
+from . import provision
 from .errors import Conflict, Invalid, NotFound
 from .redact import redact
 from .steps import registry
@@ -274,6 +275,18 @@ def set_onboarding_status(db: Session, org_id: str, onboarding_id: str, status: 
     return ob
 
 
+def request_provisioning(db: Session, org_id: str, onboarding_id: str, at: dt.datetime) -> m.Onboarding:
+    """Jay asks for the Voicent workspace now: the first time after a failure, or again to send updated answers."""
+    ob = _onboarding(db, org_id, onboarding_id)
+    if not provision.wants_provisioning(ob):
+        raise Conflict("This onboarding's template doesn't set up a Voicent workspace.")
+    if ob.status != "completed":
+        raise Conflict(f"A workspace is requested when the onboarding is finished; this one is {ob.status}.")
+    provision.request_again(ob, at)
+    db.flush()
+    return ob
+
+
 def set_nudges_paused(db: Session, org_id: str, onboarding_id: str, paused: bool) -> m.Onboarding:
     ob = _onboarding(db, org_id, onboarding_id)
     ob.nudges_paused = paused
@@ -381,6 +394,7 @@ def _after_change(db: Session, ob: m.Onboarding) -> None:
     ob.sync_version += 1  # AIOS needs to hear about this
     if ob.status == "active" and ob.steps and all(s.status in ("done", "skipped") for s in ob.steps):
         ob.status, ob.completed_at = "completed", now()
+        provision.queue(ob, ob.completed_at)  # sent after the response by provision.kick, or by the timer
     db.flush()
 
 

@@ -6,7 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from .. import aios_sync, magic_link, models as m, services
+from .. import aios_sync, magic_link, models as m, provision, services
 from .. import nudges as reminders
 from ..deps import Actor, Auth, Db, Org, Session
 from ..errors import NotFound
@@ -128,8 +128,9 @@ def pause_reminders(onboarding_id: str, body: NudgesIn, db: Session = Db, org: s
 
 @router.put("/{onboarding_id}/steps/{key}")
 def submit(onboarding_id: str, key: str, body: StepAnswerIn, request: Request, background: BackgroundTasks, db: Session = Db, org: str = Org, actor: Actor = Auth):
-    aios_sync.kick(request, background, org, onboarding_id)
     """Jay records an answer for a step (on a call, or an internal task)."""
+    aios_sync.kick(request, background, org, onboarding_id)
+    provision.kick(request, background, org, onboarding_id)
     services.submit_step(db, org, onboarding_id, key, body.data, submitted_by=f"admin:{actor.label}", actor_kind="admin")
     return _step(db, org, onboarding_id, key)
 
@@ -137,6 +138,7 @@ def submit(onboarding_id: str, key: str, body: StepAnswerIn, request: Request, b
 @router.post("/{onboarding_id}/steps/{key}/complete")
 def complete(onboarding_id: str, key: str, request: Request, background: BackgroundTasks, db: Session = Db, org: str = Org):
     aios_sync.kick(request, background, org, onboarding_id)
+    provision.kick(request, background, org, onboarding_id)
     services.complete_step(db, org, onboarding_id, key)
     return _step(db, org, onboarding_id, key)
 
@@ -144,6 +146,7 @@ def complete(onboarding_id: str, key: str, request: Request, background: Backgro
 @router.post("/{onboarding_id}/steps/{key}/skip")
 def skip(onboarding_id: str, key: str, request: Request, background: BackgroundTasks, db: Session = Db, org: str = Org):
     aios_sync.kick(request, background, org, onboarding_id)
+    provision.kick(request, background, org, onboarding_id)
     services.skip_step(db, org, onboarding_id, key)
     return _step(db, org, onboarding_id, key)
 
@@ -194,3 +197,32 @@ def sync_now(onboarding_id: str, request: Request, db: Session = Db, org: str = 
     r = aios_sync.sync_onboarding(st.sessionmaker, st.settings, org, onboarding_id, st.aios)
     db.expire_all()
     return {"result": asdict(r)} | aios_sync.status_for(db, st.settings, services.get_onboarding(db, org, onboarding_id))
+
+
+# ---------------------------------------------------------------- Voicent workspace
+
+@router.get("/{onboarding_id}/provision")
+def provision_status(onboarding_id: str, request: Request, db: Session = Db, org: str = Org):
+    return provision.status_for(db, request.app.state.settings, services.get_onboarding(db, org, onboarding_id))
+
+
+@router.get("/{onboarding_id}/provision/payload")
+def provision_payload(onboarding_id: str, request: Request, db: Session = Db, org: str = Org):
+    """Exactly what Voicent-App would receive for this onboarding now (the body; the signature headers are added when sending)."""
+    st = request.app.state
+    ob = services.get_onboarding(db, org, onboarding_id)
+    return provision.build_payload(db, st.settings, ob, st.clock())
+
+
+@router.post("/{onboarding_id}/provision")
+def provision_now(onboarding_id: str, request: Request, db: Session = Db, org: str = Org):
+    """Ask Voicent-App for the workspace right now (after a failure, or again with updated answers) and say how it went."""
+    st = request.app.state
+    if not st.settings.provisioning_enabled:
+        r = provision.DeliveryResult(True, "off", "Provisioning isn't switched on.")
+    else:
+        services.request_provisioning(db, org, onboarding_id, st.clock())
+        db.commit()  # the delivery reads in its own session
+        r = provision.deliver(st.sessionmaker, st.settings, org, onboarding_id, st.provisioner, now=st.clock(), manual=True)
+        db.expire_all()
+    return {"result": asdict(r)} | provision.status_for(db, st.settings, services.get_onboarding(db, org, onboarding_id))

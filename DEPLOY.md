@@ -26,7 +26,8 @@ Optional (each switches off with a warning when half-set):
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | SMS nudges. Needs a number registered for A2P 10DLC before real clients |
 | `RESEND_API_KEY`, `RESEND_FROM` | Email nudges. `RESEND_FROM` must use a domain verified in Resend |
 | `AIOS_API_URL`, `AIOS_SERVICE_TOKEN` | Sync into the AIOS app. `AIOS_API_URL` is the app's address without `/api` (for example `https://voicent-aios-app-production.up.railway.app`) and must be `https://`. Give this service its own entry in the AIOS app's `SERVICE_TOKENS` so it can be rotated alone |
-| `JOBS_ENABLED`, `JOBS_INTERVAL_MINUTES` | The timer for reminders and the AIOS sync. On by default, every 15 minutes. `JOBS_ENABLED=0` turns it off. **Run one instance of this service.** |
+| `VOICENT_PROVISION_URL`, `VOICENT_PROVISION_SECRET` | Ask Voicent-App for a workspace when an onboarding whose template has `on_complete: provision_voicent_workspace` is finished. The URL must be `https://`; the secret is random, 32+ characters, and must be the same value on the Voicent-App side. The receiving endpoint is not built yet (see ARCHITECTURE.md for the contract) |
+| `JOBS_ENABLED`, `JOBS_INTERVAL_MINUTES` | The timer for reminders, the AIOS sync and Voicent provisioning. On by default, every 15 minutes. `JOBS_ENABLED=0` turns it off. **Run one instance of this service.** |
 | `NUDGE_MAX`, `NUDGE_QUIET_START`, `NUDGE_QUIET_END`, `NUDGE_RETRY_HOURS` | Automatic reminders per onboarding before giving up (3), the night window in the client's local hours (21 to 8), and how long to wait before retrying a failed send (6) |
 | `DEFAULT_TIMEZONE`, `BRAND_NAME` | The time zone given to a new client (`America/New_York`) and the name used in reminder messages (`Voicent`) |
 
@@ -63,3 +64,14 @@ Both are optional and switch themselves off, with a warning in the logs, until t
 - Each client has a time zone (client page). Nobody is reminded between 9pm and 8am there.
 
 **The AIOS sync** needs `AIOS_API_URL` and `AIOS_SERVICE_TOKEN`, and the same token added to `SERVICE_TOKENS` on the AIOS service. The first time it runs it creates a project for every onboarding that has already been sent. Each onboarding page shows whether it is up to date and has a "Sync now" button.
+
+## Turning Voicent provisioning on
+
+Off until Voicent-App has an endpoint that accepts it. The contract that endpoint must meet is in ARCHITECTURE.md ("Voicent-App provisioning").
+
+1. Generate a secret: `python -c "import secrets; print(secrets.token_urlsafe(48))"`. Set it as `VOICENT_PROVISION_SECRET` here and on the Voicent-App service.
+2. Set `VOICENT_PROVISION_URL` to the Voicent-App endpoint (`https://`).
+3. Add `on_complete: provision_voicent_workspace` to the templates that should set up a workspace (for example the MSP one). Only onboardings created from that template version on are affected; live ones keep their own copy.
+4. Check what would go: open a finished onboarding's `GET /api/onboardings/<id>/provision/payload`, or run `python -m app.cli provision --dry-run`.
+
+Finished onboardings that were waiting while it was off are sent once it is on. Each onboarding page has a "Voicent workspace" panel that shows whether the request went through, and a button to send it again.

@@ -8,15 +8,17 @@ import ClientDetail from './ClientDetail'
 import OnboardingDetailPage from './OnboardingDetail'
 import OnboardingsPage from './OnboardingsPage'
 import RemindersPanel from './RemindersPanel'
+import VoicentPanel from './VoicentPanel'
 
 afterEach(() => vi.unstubAllGlobals())
 
 const ob = (over: Partial<OnboardingDetail> = {}): OnboardingDetail => ({
   id: 'o1', client_id: 'cl1', title: 'Kickoff: Acme', layout: 'checklist', status: 'active', started_at: '2026-11-01T00:00:00Z', completed_at: null,
-  last_activity_at: '2026-11-07T00:00:00Z', nudges_paused: false, attention: null, progress: { done: 1, total: 3 }, steps: [], ...over,
+  last_activity_at: '2026-11-07T00:00:00Z', nudges_paused: false, attention: null, provision_state: null, progress: { done: 1, total: 3 }, steps: [], ...over,
 })
-const features = (over = {}) => ({ sms: true, email: true, reminders: true, aios_sync: true, uploads: false, jobs: true, ...over })
+const features = (over = {}) => ({ sms: true, email: true, reminders: true, aios_sync: true, uploads: false, jobs: true, provisioning: false, ...over })
 const synced = { enabled: true, state: 'synced', project_id: 'onb-o1', log: [] }
+const notWanted = { enabled: false, wanted: false, state: 'not_wanted', workspace_id: null, attempts: 0, next_attempt_at: null, delivered_at: null, error: '', log: [] }
 
 describe('RemindersPanel', () => {
   test('says plainly when reminders are off and why, and does not offer to send', async () => {
@@ -191,7 +193,7 @@ describe('the list and the detail page flag an onboarding that needs you', () =>
   test('the detail page explains it, and for an unreachable client links to the page where it is fixed', async () => {
     mockFetch({
       'GET /onboardings/o1': { body: ob({ attention: 'unreachable' }) }, 'GET /clients': { body: [client()] }, 'GET /onboardings/o1/links': { body: [] },
-      'GET /features': { body: features() }, 'GET /onboardings/o1/nudges': { body: [] }, 'GET /onboardings/o1/sync': state(),
+      'GET /features': { body: features() }, 'GET /onboardings/o1/nudges': { body: [] }, 'GET /onboardings/o1/sync': state(), 'GET /onboardings/o1/provision': { body: notWanted },
     })
     renderRoute(<OnboardingDetailPage />, '/onboardings/:id', '/onboardings/o1')
     const banner = (await screen.findByText(/no email address or consented phone number to reach this client/)).closest('.banner')!
@@ -219,4 +221,73 @@ describe('ClientDetail time zone', () => {
     renderRoute(<ClientDetail />, '/clients/:id', '/clients/cl1')
     expect(((await screen.findByLabelText(/Their time zone/)) as HTMLSelectElement).value).toBe('Europe/Berlin')
   })
+})
+
+describe('VoicentPanel', () => {
+  const prov = (over = {}) => ({ body: { ...notWanted, enabled: true, wanted: true, state: 'waiting', ...over } })
+  const done = ob({ status: 'completed', completed_at: '2026-11-08T00:00:00Z' })
+
+  test('an onboarding whose template does not set up a workspace shows nothing', async () => {
+    mockFetch({ 'GET /onboardings/o1/provision': { body: notWanted } })
+    const { container } = renderRoute(<VoicentPanel ob={ob()} />, '/', '/')
+    await waitFor(() => expect(container.querySelector('section')).toBeNull())
+  })
+
+  test.each([
+    ['waiting', '○', 'Not yet'],
+    ['pending', '◐', 'On its way'],
+    ['delivered', '✓', 'Requested'],
+    ['failed', '✕', "Didn't go through"],
+    ['off', '–', 'Switched off'],
+  ])('%s is shown with a glyph and a word', async (st, glyph, word) => {
+    mockFetch({ 'GET /onboardings/o1/provision': prov({ state: st }) })
+    renderRoute(<VoicentPanel ob={done} />, '/', '/')
+    const badge = await screen.findByText(word)
+    expect(badge.closest('.badge')!.textContent).toContain(glyph)
+  })
+
+  test('off names the settings to set and offers no button', async () => {
+    mockFetch({ 'GET /onboardings/o1/provision': prov({ enabled: false, state: 'off' }) })
+    renderRoute(<VoicentPanel ob={done} />, '/', '/')
+    expect(await screen.findByText(/VOICENT_PROVISION_URL and VOICENT_PROVISION_SECRET/)).toBeInTheDocument()
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  test('while the client is still going there is nothing to send yet', async () => {
+    mockFetch({ 'GET /onboardings/o1/provision': prov() })
+    renderRoute(<VoicentPanel ob={ob()} />, '/', '/')
+    expect(await screen.findByText(/When the client has finished every step/)).toBeInTheDocument()
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  test('a failure says why and sending again reports the outcome in words', async () => {
+    const { calls } = mockFetch({
+      'GET /onboardings/o1/provision': prov({ state: 'failed', attempts: 1, error: 'Voicent-App refused it (status 422). Fix the cause, then send it again.',
+        log: [{ at: '2026-11-08T01:00:00Z', status: 'failed', detail: 'Voicent-App refused it (status 422). Fix the cause, then send it again.' }] }),
+      'POST /onboardings/o1/provision': { body: { ...prov({ state: 'delivered', workspace_id: 'ws_9' }).body, result: { ok: true, state: 'delivered', message: 'Voicent-App accepted it (workspace ws_9).' } } },
+    })
+    renderRoute(<VoicentPanel ob={done} />, '/', '/')
+    expect(await screen.findByText(/Last problem: Voicent-App refused it \(status 422\)/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Send to Voicent-App now' }))
+    expect(await screen.findByText('Voicent-App accepted it (workspace ws_9).')).toBeInTheDocument()
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/onboardings/o1/provision')).toBe(true)
+  })
+
+  test('once requested it names the workspace and offers to send the latest answers again', async () => {
+    mockFetch({ 'GET /onboardings/o1/provision': prov({ state: 'delivered', workspace_id: 'ws_123', delivered_at: '2026-11-08T02:00:00Z' }) })
+    renderRoute(<VoicentPanel ob={done} />, '/', '/')
+    expect(await screen.findByText(/workspace ws_123/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Send again with the latest answers' })).toBeEnabled()
+  })
+})
+
+test('the onboardings list flags a workspace request that did not go through, in words', async () => {
+  mockFetch({
+    'GET /onboardings': { body: [{ ...ob({ id: 'a', title: 'Stuck one', status: 'completed' }), provision_state: 'failed' }, { ...ob({ id: 'b', title: 'Fine one' }) }] },
+    'GET /clients': { body: [{ id: 'cl1', name: 'Acme', kind: 'trades', status: 'active', notes: '', timezone: 'America/New_York', created_at: '2026-11-01T00:00:00Z', contacts: [] }] },
+  })
+  renderRoute(<OnboardingsPage />, '/', '/')
+  const stuck = (await screen.findByText('Stuck one')).closest('li')!
+  expect(stuck.textContent).toContain("⚠ Needs you: the Voicent workspace request didn't go through")
+  expect(screen.getByText('Fine one').closest('li')!.textContent).not.toContain('Voicent')
 })

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { request } from './http'
 import type {
-  Client, Contact, Features, LinkInfo, NudgeResult, NudgeRow, OnboardingDetail, OnboardingStatus, OnboardingSummary, SentOnboarding, SyncState, TemplateDetail,
+  Client, Contact, Features, LinkInfo, NudgeResult, NudgeRow, OnboardingDetail, OnboardingStatus, OnboardingSummary, ProvisionStatus, SentOnboarding, SyncState, TemplateDetail,
   TemplateSummary, YamlImportResult,
 } from './types'
 
@@ -24,6 +24,7 @@ export const useOnboarding = (id: string) => useQuery({ queryKey: k.onboarding(i
 export const useFeatures = () => useQuery({ queryKey: ['features'], queryFn: () => request<Features>('/features'), staleTime: 60_000 })
 export const useNudgeHistory = (id: string) => useQuery({ queryKey: ['nudges', id], queryFn: () => request<NudgeRow[]>(`/onboardings/${id}/nudges`) })
 export const useSyncStatus = (id: string) => useQuery({ queryKey: ['sync', id], queryFn: () => request<SyncState>(`/onboardings/${id}/sync`) })
+export const useProvisionStatus = (id: string) => useQuery({ queryKey: ['provision', id], queryFn: () => request<ProvisionStatus>(`/onboardings/${id}/provision`) })
 export const useLinks = (id: string) => useQuery({ queryKey: k.links(id), queryFn: () => request<LinkInfo[]>(`/onboardings/${id}/links`) })
 
 // ------------------------------------------------------------------ writes
@@ -80,3 +81,5 @@ export const useRemindNow = (id: string) =>
 export const usePauseReminders = (id: string) =>
   useWrite((paused: boolean) => request<OnboardingSummary>(`/onboardings/${id}/nudges`, { method: 'PUT', body: { paused } }), () => [k.onboarding(id), k.onboardings])
 export const useSyncNow = (id: string) => useWrite(() => request<SyncState>(`/onboardings/${id}/sync`, { body: {} }), () => [['sync', id]])
+export const useProvisionNow = (id: string) =>
+  useWrite(() => request<ProvisionStatus>(`/onboardings/${id}/provision`, { body: {} }), () => [['provision', id], k.onboardings])

@@ -70,6 +70,9 @@ class Settings:
     # One-way sync into the AIOS app (projects and tasks).
     aios_api_url: str = ""
     aios_service_token: str = ""
+    # Ask Voicent-App for a workspace when an onboarding whose template says so is finished: a signed webhook. Off until both are set.
+    voicent_provision_url: str = ""
+    voicent_provision_secret: str = ""
     # Background jobs (reminders and AIOS sync) run inside the web process every few minutes. Off unless from_env turns
     # them on, so tests and scripts never start a thread by accident. Run one instance of the service.
     jobs_enabled: bool = False
@@ -103,6 +106,12 @@ class Settings:
             out.append("Client sessions: PORTAL_SIGNING_KEY is shorter than 24 characters. Using a random key until it is longer.")
         if (self.sms_enabled or self.email_enabled) and not self.app_url:
             out.append("Reminders: set APP_URL (the public address of this service) so reminders can carry a link. Reminders are off until then.")
+        if bool(self.voicent_provision_url) != bool(self.voicent_provision_secret):
+            out.append("Voicent provisioning: set both VOICENT_PROVISION_URL and VOICENT_PROVISION_SECRET. Provisioning is off until then.")
+        if self.voicent_provision_url and not self.voicent_provision_url.startswith("https://"):
+            out.append("Voicent provisioning: VOICENT_PROVISION_URL must be an https:// URL. Provisioning is off until it is.")
+        if self.voicent_provision_secret and len(self.voicent_provision_secret) < 32:
+            out.append("Voicent provisioning: VOICENT_PROVISION_SECRET is shorter than 32 characters. Provisioning is off until it is longer.")
         if not valid_timezone(self.default_timezone):
             out.append(f"DEFAULT_TIMEZONE '{self.default_timezone}' isn't a time zone name. Using America/New_York.")
         if self.aios_api_url and not self.aios_api_url.startswith("https://"):
@@ -141,6 +150,10 @@ class Settings:
     def aios_sync_enabled(self) -> bool:
         return bool(self.aios_api_url.startswith("https://") and self.aios_service_token)
 
+    @property
+    def provisioning_enabled(self) -> bool:
+        return bool(self.voicent_provision_url.startswith("https://") and len(self.voicent_provision_secret) >= 32)
+
     @classmethod
     def from_env(cls) -> "Settings":
         e = os.environ.get
@@ -170,6 +183,8 @@ class Settings:
             resend_from=e("RESEND_FROM", "").strip(),
             aios_api_url=e("AIOS_API_URL", "").rstrip("/"),
             aios_service_token=e("AIOS_SERVICE_TOKEN", "").strip(),
+            voicent_provision_url=e("VOICENT_PROVISION_URL", "").strip(),
+            voicent_provision_secret=e("VOICENT_PROVISION_SECRET", "").strip(),
             jobs_enabled=e("JOBS_ENABLED", "1") != "0",
             jobs_interval_minutes=int(e("JOBS_INTERVAL_MINUTES", "15")),
             nudge_max=int(e("NUDGE_MAX", "3")),
