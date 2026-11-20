@@ -5,8 +5,14 @@ import ClientDetail from './admin/ClientDetail'
 import ClientsPage from './admin/ClientsPage'
 import NewOnboardingPage from './admin/NewOnboardingPage'
 import OnboardingDetail from './admin/OnboardingDetail'
+import OnboardingFollowUpPage from './admin/OnboardingFollowUpPage'
+import OnboardingLayout from './admin/OnboardingLayout'
+import OnboardingPreviewPage from './admin/OnboardingPreviewPage'
 import OnboardingStepsPage from './admin/OnboardingStepsPage'
 import OnboardingsPage from './admin/OnboardingsPage'
+import NotificationsPage from './admin/NotificationsPage'
+import SettingsPage from './admin/SettingsPage'
+import TeamPage from './admin/TeamPage'
 import TemplateBuilderPage from './admin/TemplateBuilderPage'
 import TemplatesPage from './admin/TemplatesPage'
 import { AuthProvider, useAuth } from './auth/AuthContext'
@@ -29,14 +35,21 @@ export default function App() {
           <Route path="/c/:token" element={<PortalPage />} />
           <Route element={<AuthProvider><AdminGate /></AuthProvider>}>
             <Route index element={<OnboardingsPage />} />
-            <Route path="onboardings/:id" element={<OnboardingDetail />} />
-            <Route path="onboardings/:id/steps" element={<OnboardingStepsPage />} />
+            <Route path="onboardings/:id" element={<OnboardingLayout />}>
+              <Route index element={<OnboardingDetail />} />
+              <Route path="steps" element={<OnboardingStepsPage />} />
+              <Route path="preview" element={<OnboardingPreviewPage />} />
+              <Route path="follow-up" element={<OnboardingFollowUpPage />} />
+            </Route>
             <Route path="clients" element={<ClientsPage />} />
             <Route path="clients/:id" element={<ClientDetail />} />
             <Route path="templates" element={<TemplatesPage />} />
             <Route path="templates/new" element={<TemplateBuilderPage key="new" />} />
             <Route path="templates/:id/edit" element={<TemplateBuilderPage key="edit" />} />
             <Route path="new" element={<NewOnboardingPage />} />
+            <Route path="settings" element={<SettingsPage />} />
+            <Route path="team" element={<TeamPage />} />
+            <Route path="notifications" element={<NotificationsPage />} />
             <Route path="*" element={<main className="narrow"><h1>Not found</h1></main>} />
           </Route>
         </Routes>

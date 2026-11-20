@@ -42,8 +42,9 @@ def validate(document: Any = Body(...), _: Actor = Auth):
 
 
 @router.post("", status_code=201)
-def save(document: Any = Body(...), db: Session = Db, org: str = Org, actor: Actor = Auth):
-    t, v, new_version = services.save_template(db, org, document, created_by=actor.label)
+def save(document: Any = Body(...), new: bool = False, db: Session = Db, org: str = Org, actor: Actor = Auth):
+    """Adds a version when the slug is taken. With ?new=true it only ever makes a new template: a taken slug is a 409."""
+    t, v, new_version = services.save_template(db, org, document, created_by=actor.label, create_only=new)
     return _detail(db, org, t, v.version) | {"new_version": new_version}
 
 

@@ -20,7 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from . import magic_link
+from . import branding, magic_link, notifications
 from . import models as m
 from .config import Settings, valid_timezone
 from .errors import Conflict
@@ -69,10 +69,11 @@ def open_steps(ob: m.Onboarding, contact: m.Contact, primary: m.Contact | None) 
     return out
 
 
-def build_message(settings: Settings, contact: m.Contact, steps: list[m.Step], url: str) -> dict:
+def build_message(settings: Settings, contact: m.Contact, steps: list[m.Step], url: str, brand: str | None = None) -> dict:
+    """`brand`: the name the client knows (branding.display_name); a reseller's clients never see "Voicent"."""
     first = (contact.name.split() or ["there"])[0]
     n = len(steps)
-    brand = settings.brand_name
+    brand = brand or settings.brand_name
     nxt = steps[0].title
     left = f"{n} step{'s' if n != 1 else ''} left"
     sms = f"{brand}: Hi {first}, you have {left} in your onboarding. Next up: {nxt[:60]}. Continue here: {url} Reply STOP to opt out."
@@ -141,8 +142,12 @@ def _nudge_contact(db, settings, notifier, ob, client, contact, steps, round_no,
         except IntegrityError:
             return Outcome(contact.name, "later", channel=channel, reason="Another run is already reminding them.")
         raw, link = magic_link.issue_link(db, settings, ob.org_id, ob.id, contact.id)
-        msg = build_message(settings, contact, steps, f"{app_url}/c/{raw}")
-        result = notifier.send_sms(address, msg["sms"]) if channel == "sms" else notifier.send_email(address, msg["subject"], msg["text"], msg["html"])
+        org = db.get(m.Org, ob.org_id)
+        msg = build_message(settings, contact, steps, f"{app_url}/c/{raw}", branding.display_name(org, settings))
+        if channel == "sms":
+            result = notifier.send_sms(address, msg["sms"], sender=branding.sms_from(org, settings))
+        else:
+            result = notifier.send_email(address, msg["subject"], msg["text"], msg["html"], sender=branding.email_from(org, settings), reply_to=branding.reply_to(org))
         if result.ok:
             row.status, row.sent_at = "sent", now
             db.flush()
@@ -206,10 +211,12 @@ def run_nudges(sm: sessionmaker, settings: Settings, notifier: Notifier, now: dt
             rounds = db.scalar(select(func.count(func.distinct(m.Nudge.round))).where(m.Nudge.onboarding_id == ob.id, m.Nudge.template == "stalled", m.Nudge.status == "sent")) or 0
             if rounds >= settings.nudge_max:
                 if ob.attention != "nudges_exhausted":
-                    ob.attention = "nudges_exhausted"
                     summary.flagged += 1
                     summary.details.append(f"{ob.title}: no reply after {rounds} reminders")
-                db.commit()
+                    if not dry_run:  # a dry run changes nothing, so the next real pass still flags it and tells the owner
+                        ob.attention = "nudges_exhausted"
+                        notifications.client_gone_quiet(db, ob, rounds)
+                        db.commit()
                 continue
             summary.considered += 1
             outcomes = nudge_onboarding(db, settings, notifier, ob, now, manual=False, dry_run=dry_run)

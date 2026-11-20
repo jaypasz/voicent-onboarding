@@ -62,8 +62,12 @@ def finish(w, oid, last=True):
         assert r.status_code == 200
 
 
-def live(w, doc=PROV_DOC):
-    _, oid, links = w.live(doc=doc)
+def live(w, doc=PROV_DOC, paying=True):
+    """A sent onboarding. Its client is a paying customer unless paying=False: a workspace is only asked for once they pay."""
+    cl, oid, links = w.live(doc=doc)
+    if paying:
+        assert w.api.post(f"/api/clients/{cl['id']}/paying", json={"paying": True}).status_code == 200
+    w.client_id = cl["id"]
     return oid, links
 
 
@@ -88,7 +92,8 @@ def test_off_unless_an_https_url_and_a_long_secret_are_both_set_and_half_set_onl
 def test_turned_off_nothing_is_sent_and_the_page_says_so():
     world, client = make_world()
     with client:
-        _, oid, _ = world.live(doc=PROV_DOC)
+        cl, oid, _ = world.live(doc=PROV_DOC)
+        client.post(f"/api/clients/{cl['id']}/paying", json={"paying": True})
         finish(world, oid)
         ob = world.get(oid)
         assert ob.status == "completed" and ob.provision_state == "pending"  # it waits, so turning it on later still sends it
@@ -122,7 +127,7 @@ def test_nothing_goes_until_the_last_step_is_done_then_exactly_one_signed_delive
     req = w.voicent.requests[0]
     assert req.method == "POST" and str(req.url) == URL
     h = req.headers
-    assert h["x-voicent-event"] == "onboarding.completed" and h["content-type"] == "application/json"
+    assert h["x-voicent-event"] == "workspace.requested" and h["content-type"] == "application/json"
     assert provision.verify(SECRET, h["x-voicent-signature"], h["x-voicent-timestamp"], req.content)
     body = json.loads(req.content)
     assert h["x-voicent-delivery"] == body["delivery_id"] == state(w, oid).provision_delivery_id
@@ -151,14 +156,16 @@ def test_the_client_finishing_it_in_the_portal_sends_it_too(w):
 
 # ---------------------------------------------------------------- what goes out
 
-def test_the_payload_carries_the_client_contacts_answers_and_integrations(w):
+def test_the_payload_carries_the_tenant_client_contacts_and_answers_but_no_connected_accounts(w):
     oid, _ = live(w)
     finish(w, oid)
     p = w.voicent.bodies()[0]
-    assert p["event"] == "onboarding.completed" and p["schema_version"] == 1 and p["source"] == "voicent-onboarding"
+    assert p["event"] == "workspace.requested" and p["schema_version"] == 2 and p["source"] == "voicent-onboarding"
     with w.sm() as db:
         org = db.get(m.Org, w.get(oid).org_id)
         assert p["org"] == {"id": org.id, "slug": org.slug, "name": org.name}
+    assert p["tenant"] == {"voicent_tenant_id": None, "account_type": "direct"}  # an org made by seed has no Voicent tenant
+    assert p["client"]["paying_since"].endswith("Z")
     assert p["client"]["name"] == "Acme Plumbing" and p["client"]["timezone"] == "America/New_York"
     assert p["onboarding"]["id"] == oid and p["onboarding"]["template"] == {"slug": "mini-ws", "version": 1, "name": "Mini with workspace"}
     assert p["onboarding"]["url"] == f"https://onboard.test/onboardings/{oid}" and p["onboarding"]["completed_at"].endswith("Z")
@@ -166,7 +173,7 @@ def test_the_payload_carries_the_client_contacts_answers_and_integrations(w):
     assert people["Pat Owner"]["email"] == "pat@acme.test" and people["Pat Owner"]["sms_consent"] is True and people["Pat Owner"]["role"] == "owner"
     assert people["Ivy IT"]["phone"] is None and people["Ivy IT"]["sms_consent"] is False
     assert p["answers"] == {"basics": {"name": {"label": "Name", "type": "text", "value": "Acme [redacted]"}}}
-    assert p["integrations"] == [{"step_key": "it_access", "provider": "dns", "label": "DNS", "access_mode": "oauth", "status": "connected", "account_label": "Cloudflare (acme)"}]
+    assert "integrations" not in p and p["files"] == []  # only text answers and files go to Voicent-App
 
 
 def test_the_payload_never_carries_internal_steps_comments_approval_notes_files_tokens_or_the_secret(w):
@@ -174,7 +181,8 @@ def test_the_payload_never_carries_internal_steps_comments_approval_notes_files_
     finish(w, oid)
     req = w.voicent.requests[0]
     raw = req.content.decode()
-    for never in ("build", "Build the agent", "Create it", "Make it warmer", "A private note", "approve", "sk-live-abcdefghijklmnop1234", SECRET):
+    for never in ("build", "Build the agent", "Create it", "Make it warmer", "A private note", "approve", "sk-live-abcdefghijklmnop1234", SECRET,
+                  "it_access", "Cloudflare"):
         assert never not in raw, never
     for link in links.values():
         assert token_in(link["url"]) not in raw
@@ -185,7 +193,7 @@ def test_the_payload_preview_is_what_would_be_sent(w):
     oid, _ = live(w)
     finish(w, oid, last=False)
     p = w.api.get(f"/api/onboardings/{oid}/provision/payload").json()
-    assert p["delivery_id"] == "preview" and p["answers"] == {} and p["integrations"][0]["status"] == "connected"
+    assert p["delivery_id"] == "preview" and p["answers"] == {} and p["files"] == [] and "integrations" not in p
 
 
 # ---------------------------------------------------------------- the signature
@@ -330,3 +338,165 @@ def test_text_is_redacted_again_on_the_way_out(w):
         db.commit()
     p = w.api.get(f"/api/onboardings/{oid}/provision/payload").json()
     assert p["answers"]["basics"]["name"]["value"] == "key [redacted]"
+
+
+# ---------------------------------------------------------------- only for a paying client
+
+def test_a_client_who_finishes_but_hasnt_paid_is_not_sent_until_marked_paying(w):
+    oid, _ = live(w, paying=False)
+    finish(w, oid)
+    assert state(w, oid).status == "completed" and state(w, oid).provision_state is None and not w.voicent.requests
+    st = w.api.get(f"/api/onboardings/{oid}/provision").json()
+    assert st["state"] == "unpaid" and st["paying"] is False and st["client_id"] == w.client_id
+    r = w.api.post(f"/api/onboardings/{oid}/provision")
+    assert r.status_code == 409 and "paying customer" in r.json()["detail"]
+    assert provision.deliver_due(w.sm, w.settings, w.app.state.provisioner)["delivered"] == 0
+
+    out = w.api.post(f"/api/clients/{w.client_id}/paying", json={"paying": True}).json()
+    assert out["paying_since"] is not None
+    assert len(w.voicent.requests) == 1 and state(w, oid).provision_state == "delivered"
+    # marking them paying again changes nothing and sends nothing more
+    w.api.post(f"/api/clients/{w.client_id}/paying", json={"paying": True})
+    assert len(w.voicent.requests) == 1
+
+
+def test_unmarking_paying_cancels_a_request_still_waiting_but_not_one_already_accepted(w):
+    oid, _ = live(w)
+    w.voicent.replies = [503]
+    finish(w, oid)
+    assert state(w, oid).provision_state == "pending"
+    w.api.post(f"/api/clients/{w.client_id}/paying", json={"paying": False})
+    assert state(w, oid).provision_state is None
+    assert w.api.get(f"/api/onboardings/{oid}/provision").json()["state"] == "unpaid"
+    assert provision.deliver_due(w.sm, w.settings, w.app.state.provisioner, now=dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=2))["delivered"] == 0
+
+    w.api.post(f"/api/clients/{w.client_id}/paying", json={"paying": True})
+    assert state(w, oid).provision_state == "delivered"
+    w.api.post(f"/api/clients/{w.client_id}/paying", json={"paying": False})
+    assert state(w, oid).provision_state == "delivered" and state(w, oid).voicent_workspace_id == "ws_123"
+
+
+def test_another_org_cannot_mark_a_client_paying(w):
+    from app import services
+    from app.errors import NotFound
+
+    _, oid, _ = w.live(doc=PROV_DOC)
+    with w.sm() as db:
+        other = m.Org(name="Other", slug="other")
+        db.add(other)
+        db.flush()
+        cid = db.get(m.Onboarding, oid).client_id
+        with pytest.raises(NotFound):
+            services.set_client_paying(db, other.id, cid, True, dt.datetime.now(dt.timezone.utc))
+        assert db.get(m.Client, cid).paying_since is None
+
+
+# ---------------------------------------------------------------- files, as short-lived links
+
+UPLOAD_DOC = {**PROV_DOC, "slug": "mini-ws-files", "steps": PROV_DOC["steps"] + [
+    {"key": "logo", "type": "upload", "title": "Your logo", "config": {"accept": ["png", "pdf"]}}]}
+
+
+class FakeStorage:
+    def __init__(self, fail=False):
+        self.fail, self.signed = fail, []
+
+    def info(self, path):
+        return {"size": 2048}
+
+    def signed_download(self, path, ttl=600):
+        from app.storage import StorageError
+        if self.fail:
+            raise StorageError("no")
+        self.signed.append((path, ttl))
+        return f"https://store.test/sign/{path}?ttl={ttl}"
+
+
+def add_file(w, oid, key, name):
+    with w.sm() as db:
+        step = next(s for s in db.get(m.Onboarding, oid).steps if s.key == key)
+        f = m.File(org_id=step.org_id, step_id=step.id, storage_path=f"{step.org_id}/{oid}/{step.id}/{name}", name=name, size=2048, content_type="image/png")
+        db.add(f)
+        db.commit()
+        return f.id
+
+
+def test_the_files_the_client_uploaded_go_as_links_that_expire(w):
+    w.app.state.storage = FakeStorage()
+    oid, _ = live(w, UPLOAD_DOC)
+    old = add_file(w, oid, "logo", "draft.png")
+    keep = add_file(w, oid, "logo", "logo.png")
+    assert w.api.put(f"/api/onboardings/{oid}/steps/logo", json={"data": {"file_ids": [old]}}).status_code == 200
+    assert w.api.put(f"/api/onboardings/{oid}/steps/logo", json={"data": {"file_ids": [keep]}}).status_code == 200
+    finish(w, oid)
+    p = w.voicent.bodies()[0]
+    assert p["files"] == [{
+        "step_key": "logo", "step_title": "Your logo", "id": keep, "name": "logo.png", "content_type": "image/png", "size": 2048,
+        "url": f"https://store.test/sign/{w.get(oid).org_id}/{oid}/{next(s.id for s in w.get(oid).steps if s.key == 'logo')}/logo.png?ttl=3600",
+        "url_expires_at": p["files"][0]["url_expires_at"],
+    }]  # only the file in the accepted answer, not an earlier attempt
+    assert p["files"][0]["url_expires_at"].endswith("Z")
+    # the preview never hands out a working link
+    preview = w.api.get(f"/api/onboardings/{oid}/provision/payload").json()
+    assert preview["files"][0]["url"] is None and len(w.app.state.storage.signed) == 1
+
+
+def test_if_file_links_cant_be_made_the_request_waits_and_is_tried_again(w):
+    w.app.state.storage = FakeStorage(fail=True)
+    oid, _ = live(w, UPLOAD_DOC)
+    fid = add_file(w, oid, "logo", "logo.png")
+    w.app.state.storage.fail = False
+    w.api.put(f"/api/onboardings/{oid}/steps/logo", json={"data": {"file_ids": [fid]}})
+    w.app.state.storage.fail = True
+    finish(w, oid)
+    ob = state(w, oid)
+    assert not w.voicent.requests and ob.provision_state == "pending" and "file links" in ob.provision_error
+    w.app.state.storage.fail = False
+    r = provision.deliver(w.sm, w.settings, ob.org_id, oid, w.app.state.provisioner, manual=True, storage=w.app.state.storage)
+    assert r.state == "delivered" and w.voicent.bodies()[0]["files"][0]["url"].startswith("https://store.test/")
+
+
+def test_send_it_now_waits_for_a_send_already_in_flight_rather_than_sending_alongside_it(w):
+    oid, _ = live(w)
+    org_id = None
+    seen = []
+
+    def jay_clicks_send_now():
+        if not seen:  # while the first request is in flight, Jay asks for it now (which also resets the retry time)
+            with w.sm() as db:
+                provision.request_again(db.get(m.Onboarding, oid), dt.datetime.now(dt.timezone.utc))
+                db.commit()
+            seen.append(provision.deliver(w.sm, w.settings, org_id, oid, w.app.state.provisioner, manual=True))
+
+    finish(w, oid, last=False)
+    org_id = w.get(oid).org_id
+    w.voicent.during = jay_clicks_send_now
+    w.api.put(f"/api/onboardings/{oid}/steps/basics", json={"data": {"answers": {"name": "Acme"}}})
+    assert seen and seen[0].state == "skipped" and "right now" in seen[0].message
+    ob = state(w, oid)
+    assert len(w.voicent.requests) == 1 and ob.provision_state == "delivered" and ob.provision_lease_until is None
+
+
+def test_send_it_now_still_skips_the_wait_for_a_retry(w):
+    oid, _ = live(w)
+    w.voicent.replies = [500]
+    finish(w, oid)
+    ob = state(w, oid)
+    assert ob.provision_state == "pending" and ob.provision_lease_until is None  # the failed try reported back
+    r = w.api.post(f"/api/onboardings/{oid}/provision").json()
+    assert r["result"]["state"] == "delivered" and len(w.voicent.requests) == 2
+
+
+def test_finishing_again_after_a_delivery_failed_for_good_does_not_start_it_over(w):
+    oid, _ = live(w)
+    w.voicent.replies = [422]
+    finish(w, oid)
+    ob = state(w, oid)
+    assert ob.provision_state == "failed"
+    old = ob.provision_delivery_id
+    assert w.api.post(f"/api/onboardings/{oid}/steps/basics/reopen").status_code == 200
+    assert w.api.put(f"/api/onboardings/{oid}/steps/basics", json={"data": {"answers": {"name": "Acme"}}}).status_code == 200
+    ob = state(w, oid)
+    assert w.get(oid).status == "completed"
+    assert ob.provision_state == "failed" and ob.provision_delivery_id == old and "refused it (status 422)" in ob.provision_error
+    assert len(w.voicent.requests) == 1  # only Jay's "send it again" starts it over

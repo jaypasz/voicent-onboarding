@@ -97,3 +97,20 @@ def test_another_org_cannot_read_or_edit_the_document(app_two_orgs):
     assert c.get(f"/api/onboardings/{ob['id']}/document", headers=b).status_code == 404
     assert c.put(f"/api/onboardings/{ob['id']}/document", json={"steps": [UPLOAD]}, headers=b).status_code == 404
     assert len(c.get(f"/api/onboardings/{ob['id']}", headers=a).json()["steps"]) == 3
+
+
+def test_a_new_required_question_reopens_a_draft_step_that_was_already_answered(client):
+    """Otherwise the step stays done, the client is never asked the new question, and the onboarding can finish without it."""
+    t, cl = setup_client(client, {})
+    ob = create(client, t, cl).json()
+    assert client.put(f"/api/onboardings/{ob['id']}/steps/basics", json={"data": {"answers": {"name": "Pat"}}}).status_code == 200
+    steps = client.get(f"/api/onboardings/{ob['id']}/document").json()["document"]["steps"]
+    basics = steps[0]
+    renamed = [{**basics, "title": "About you"}] + steps[1:]  # an edit that leaves the answer valid keeps it done
+    out = client.put(f"/api/onboardings/{ob['id']}/document", json={"steps": renamed}).json()
+    assert next(s for s in out["steps"] if s["key"] == "basics")["status"] == "done"
+    fields = basics["config"]["fields"] + [{"key": "phone", "label": "Phone", "type": "text", "required": True}]
+    more = [{**basics, "config": {**basics["config"], "fields": fields}}] + steps[1:]
+    out = client.put(f"/api/onboardings/{ob['id']}/document", json={"steps": more}).json()
+    step = next(s for s in out["steps"] if s["key"] == "basics")
+    assert step["status"] == "in_progress" and step["response"]["data"] == {"answers": {"name": "Pat"}}

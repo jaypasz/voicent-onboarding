@@ -20,7 +20,3 @@ def features(request: Request, _: Actor = Auth):
             "uploads": s.uploads_enabled, "jobs": s.jobs_enabled, "provisioning": s.provisioning_enabled}
 
 
-@router.get("/me")
-def me(actor: Actor = Auth):
-    """Who the server thinks is calling. Behind auth, so it doubles as the check that login works."""
-    return {"id": actor.id, "label": actor.label, "kind": actor.kind}

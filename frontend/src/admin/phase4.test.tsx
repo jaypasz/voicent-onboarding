@@ -2,6 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { Client, OnboardingDetail, OnboardingSummary } from '../api/types'
+import { PROVISION_POLL_MS, useAnswerStep, useStepAction } from '../api/admin'
 import { mockFetch, renderRoute } from '../test/helpers'
 import AiosPanel from './AiosPanel'
 import ClientDetail from './ClientDetail'
@@ -177,12 +178,12 @@ describe('AiosPanel', () => {
 
 describe('the list and the detail page flag an onboarding that needs you', () => {
   const summary = (over: Partial<OnboardingSummary>): OnboardingSummary => ({ ...ob(), ...over })
-  const client = (over: Partial<Client> = {}): Client => ({ id: 'cl1', name: 'Acme', kind: 'trades', status: 'active', notes: '', timezone: 'America/New_York', created_at: '2026-11-01T00:00:00Z', contacts: [], ...over })
+  const client = (over: Partial<Client> = {}): Client => ({ id: 'cl1', name: 'Acme', kind: 'trades', status: 'active', notes: '', timezone: 'America/New_York', created_at: '2026-11-01T00:00:00Z', paying_since: null, contacts: [], ...over })
 
   test('each reason is a word as well as a badge', async () => {
     mockFetch({
       'GET /onboardings': { body: [summary({ id: 'a', title: 'Quiet one', attention: 'nudges_exhausted' }), summary({ id: 'b', title: 'Lost one', attention: 'unreachable' }), summary({ id: 'c', title: 'Fine one' })] },
-      'GET /clients': { body: [client()] },
+      'GET /clients': { body: [client()] }, 'GET /team': { body: { linked: false, in_sync: true, can_manage: true, me: null, members: [], invites: [] } },
     })
     renderRoute(<OnboardingsPage />, '/', '/')
     expect(await screen.findByText(/Needs you: no reply to the reminders/)).toBeInTheDocument()
@@ -194,6 +195,7 @@ describe('the list and the detail page flag an onboarding that needs you', () =>
     mockFetch({
       'GET /onboardings/o1': { body: ob({ attention: 'unreachable' }) }, 'GET /clients': { body: [client()] }, 'GET /onboardings/o1/links': { body: [] },
       'GET /features': { body: features() }, 'GET /onboardings/o1/nudges': { body: [] }, 'GET /onboardings/o1/sync': state(), 'GET /onboardings/o1/provision': { body: notWanted },
+      'GET /team': { body: { linked: false, in_sync: true, can_manage: true, me: null, members: [], invites: [] } },
     })
     renderRoute(<OnboardingDetailPage />, '/onboardings/:id', '/onboardings/o1')
     const banner = (await screen.findByText(/no email address or consented phone number to reach this client/)).closest('.banner')!
@@ -204,7 +206,7 @@ describe('the list and the detail page flag an onboarding that needs you', () =>
 })
 
 describe('ClientDetail time zone', () => {
-  const client: Client = { id: 'cl1', name: 'Acme', kind: 'trades', status: 'active', notes: '', timezone: 'America/Chicago', created_at: '2026-11-01T00:00:00Z', contacts: [] }
+  const client: Client = { id: 'cl1', name: 'Acme', kind: 'trades', status: 'active', notes: '', timezone: 'America/Chicago', created_at: '2026-11-01T00:00:00Z', paying_since: null, contacts: [] }
 
   test('shows the current zone and saves a new one', async () => {
     const { calls } = mockFetch({ 'GET /clients': { body: [client] }, 'GET /onboardings': { body: [] }, 'PATCH /clients/cl1': { body: { ...client, timezone: 'America/Denver' } } })
@@ -256,7 +258,7 @@ describe('VoicentPanel', () => {
   test('while the client is still going there is nothing to send yet', async () => {
     mockFetch({ 'GET /onboardings/o1/provision': prov() })
     renderRoute(<VoicentPanel ob={ob()} />, '/', '/')
-    expect(await screen.findByText(/When the client has finished every step/)).toBeInTheDocument()
+    expect(await screen.findByText(/Once the client has finished every step and is a paying customer/)).toBeInTheDocument()
     expect(screen.queryByRole('button')).toBeNull()
   })
 
@@ -273,6 +275,50 @@ describe('VoicentPanel', () => {
     expect(calls.some((c) => c.method === 'POST' && c.path === '/onboardings/o1/provision')).toBe(true)
   })
 
+  test('while a delivery is on its way the panel reads it again until the outcome shows, without a reload', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      let reads = 0
+      mockFetch({ 'GET /onboardings/o1/provision': () => (++reads === 1 ? prov({ state: 'pending', attempts: 1 }) : prov({ state: 'delivered', workspace_id: 'ws_7' })) })
+      renderRoute(<VoicentPanel ob={done} />, '/', '/')
+      expect(await screen.findByText('On its way')).toBeInTheDocument()
+      await vi.advanceTimersByTimeAsync(PROVISION_POLL_MS)
+      expect(await screen.findByText(/workspace ws_7/)).toBeInTheDocument()
+      const after = reads
+      await vi.advanceTimersByTimeAsync(PROVISION_POLL_MS * 2)
+      expect(reads).toBe(after) // once it has an outcome it stops asking
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test('finishing a step on the page reads the provisioning status again', async () => {
+    let reads = 0
+    mockFetch({
+      'GET /onboardings/o1/provision': () => (++reads === 1 ? prov() : prov({ state: 'delivered', workspace_id: 'ws_8' })),
+      'POST /onboardings/o1/steps/build/complete': { body: {} },
+      'PUT /onboardings/o1/steps/basics': { body: {} },
+    })
+    function Page() {
+      const action = useStepAction('o1')
+      const answer = useAnswerStep('o1')
+      return (
+        <>
+          <VoicentPanel ob={done} />
+          <button onClick={() => action.mutate({ key: 'build', action: 'complete' })}>Finish build</button>
+          <button onClick={() => answer.mutate({ key: 'basics', data: {} })}>Answer basics</button>
+        </>
+      )
+    }
+    renderRoute(<Page />, '/', '/')
+    expect(await screen.findByText('Not yet')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Finish build' }))
+    expect(await screen.findByText(/workspace ws_8/)).toBeInTheDocument()
+    const after = reads
+    await userEvent.click(screen.getByRole('button', { name: 'Answer basics' }))
+    await waitFor(() => expect(reads).toBeGreaterThan(after))
+  })
+
   test('once requested it names the workspace and offers to send the latest answers again', async () => {
     mockFetch({ 'GET /onboardings/o1/provision': prov({ state: 'delivered', workspace_id: 'ws_123', delivered_at: '2026-11-08T02:00:00Z' }) })
     renderRoute(<VoicentPanel ob={done} />, '/', '/')
@@ -284,7 +330,7 @@ describe('VoicentPanel', () => {
 test('the onboardings list flags a workspace request that did not go through, in words', async () => {
   mockFetch({
     'GET /onboardings': { body: [{ ...ob({ id: 'a', title: 'Stuck one', status: 'completed' }), provision_state: 'failed' }, { ...ob({ id: 'b', title: 'Fine one' }) }] },
-    'GET /clients': { body: [{ id: 'cl1', name: 'Acme', kind: 'trades', status: 'active', notes: '', timezone: 'America/New_York', created_at: '2026-11-01T00:00:00Z', contacts: [] }] },
+    'GET /clients': { body: [{ id: 'cl1', name: 'Acme', kind: 'trades', status: 'active', notes: '', timezone: 'America/New_York', created_at: '2026-11-01T00:00:00Z', paying_since: null, contacts: [] }] },
   })
   renderRoute(<OnboardingsPage />, '/', '/')
   const stuck = (await screen.findByText('Stuck one')).closest('li')!

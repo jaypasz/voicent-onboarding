@@ -107,6 +107,18 @@ def test_saving_an_unchanged_template_adds_no_version(client):
     assert first["id"] == second["id"] and second["new_version"] is False and second["versions"] == [1]
 
 
+def test_a_new_template_never_reuses_a_taken_name_even_an_archived_one(client):
+    """"Save as template" and "New template" promise a new template: they must not add a version to, or unarchive, another."""
+    t = client.post("/api/templates", json=DOC).json()
+    assert client.post(f"/api/templates/{t['id']}/archive").json()["archived"] is True
+    r = client.post("/api/templates?new=true", json={**DOC, "steps": DOC["steps"][:1]})
+    assert r.status_code == 409 and "archived" in r.json()["detail"]
+    after = client.get(f"/api/templates/{t['id']}").json()
+    assert after["archived"] is True and after["versions"] == [1]
+    other = client.post("/api/templates?new=true", json={**DOC, "name": "Mini two", "slug": "mini-two"})
+    assert other.status_code == 201 and other.json()["id"] != t["id"]
+
+
 def test_template_import_export_and_dry_run(client):
     from app.templates import loader
 

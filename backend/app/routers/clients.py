@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, BackgroundTasks, Request
+from pydantic import BaseModel
 
-from .. import services
+from .. import provision, services
 from ..deps import Db, Org, Session
 from ..schemas import ClientIn, ClientOut, ClientPatch, ContactIn, ContactOut, ContactPatch
 
@@ -38,3 +39,17 @@ def add_contact(client_id: str, body: ContactIn, db: Session = Db, org: str = Or
 @router.patch("/{client_id}/contacts/{contact_id}", response_model=ContactOut)
 def update_contact(client_id: str, contact_id: str, body: ContactPatch, db: Session = Db, org: str = Org):
     return services.update_contact(db, org, client_id, contact_id, **body.model_dump(exclude_unset=True))
+
+
+class PayingIn(BaseModel):
+    paying: bool
+
+
+@router.post("/{client_id}/paying", response_model=ClientOut)
+def set_paying(client_id: str, body: PayingIn, request: Request, background: BackgroundTasks, db: Session = Db, org: str = Org):
+    """Mark the client as a paying customer, or not. Paying is what lets a finished onboarding ask Voicent-App for a
+    workspace; any that are waiting for it are sent once the response has gone."""
+    client, queued = services.set_client_paying(db, org, client_id, body.paying, request.app.state.clock())
+    for oid in queued:
+        provision.kick(request, background, org, oid)
+    return client

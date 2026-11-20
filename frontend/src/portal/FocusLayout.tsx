@@ -4,30 +4,37 @@ import { Banner } from '../components/Banner'
 import { STEP_STATUS } from '../lib/format'
 import StepPanel from './StepPanel'
 
-const open = (s: { status: string; can_write: boolean }) => s.can_write && s.status !== 'done' && s.status !== 'skipped'
+type Navigable = { status: string; can_write: boolean; assignee?: { is_you: boolean } | null }
+
+/**
+ * Whether a step still waits on this contact. A preview has writing switched off on every step,
+ * so there it goes by the step's own status and who it is for, as the real portal would.
+ */
+export const isOpen = (s: Navigable, preview: boolean) =>
+  s.status !== 'done' && s.status !== 'skipped' && (preview ? !s.assignee || s.assignee.is_you : s.can_write)
 
 /** The first step to work on after `from`, wrapping round. -1 when everything the client can do is done. */
-export function nextOpenIndex(steps: { status: string; can_write: boolean }[], from: number): number {
-  for (let i = from + 1; i < steps.length; i++) if (open(steps[i])) return i
-  return steps.findIndex(open)
+export function nextOpenIndex(steps: Navigable[], from: number, preview = false): number {
+  for (let i = from + 1; i < steps.length; i++) if (isOpen(steps[i], preview)) return i
+  return steps.findIndex((s) => isOpen(s, preview))
 }
 
 /** One step per screen, for a phone. After a step is saved the next open one comes up by itself. */
-export default function FocusLayout({ view, onChanged }: { view: PortalView; onChanged: () => Promise<unknown> }) {
+export default function FocusLayout({ view, onChanged, preview = false }: { view: PortalView; onChanged: () => Promise<unknown>; preview?: boolean }) {
   const steps = view.steps
-  const [index, setIndex] = useState(() => Math.max(0, nextOpenIndex(steps, -1)))
+  const [index, setIndex] = useState(() => Math.max(0, nextOpenIndex(steps, -1, preview)))
   const [advance, setAdvance] = useState(false)
   const [reviewing, setReviewing] = useState(false)
 
   useEffect(() => {
     if (!advance) return
     setAdvance(false)
-    const next = nextOpenIndex(steps, index)
+    const next = nextOpenIndex(steps, index, preview)
     if (next === -1) setReviewing(false)
     else setIndex(next)
-  }, [advance, steps, index])
+  }, [advance, steps, index, preview])
 
-  const allDone = nextOpenIndex(steps, -1) === -1 && view.status !== 'paused'
+  const allDone = nextOpenIndex(steps, -1, preview) === -1 && view.status !== 'paused'
   if (allDone && !reviewing) {
     return (
       <div className="stack center">
