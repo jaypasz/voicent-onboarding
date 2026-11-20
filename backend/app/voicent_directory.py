@@ -3,6 +3,7 @@
 Read only, from Voicent-App's Supabase project (PostgREST, with its service key), and only these columns:
   users(auth_id, tenant_id, role, is_superuser)          the person, by their Supabase login id
   tenants(id, slug, company_name, account_type, settings) the tenant, and the brand in settings.branding
+  users(auth_id, email, role) where tenant_id = …         the tenant's team, so they can be assigned before signing in
 Nothing is ever written there. Answers are cached for a few minutes, so a change in Voicent-App (a new role, someone
 removed) reaches this app within that time.
 
@@ -45,6 +46,16 @@ class Person:
     tenant: Tenant | None
     role: str  # admin | manager | member | viewer
     is_superuser: bool
+
+
+@dataclass(frozen=True)
+class TeamMember:
+    auth_id: str
+    email: str
+    role: str
+
+
+MAX_TEAM = 500
 
 
 def role_of(raw) -> str:
@@ -94,6 +105,18 @@ class VoicentDirectory:
                 )
         return Person(auth_id=auth_id, tenant=tenant, role=role_of(u.get("role")), is_superuser=u.get("is_superuser") is True)
 
+    def team(self, tenant_id: str) -> list[TeamMember]:
+        """Everyone in a tenant (at most MAX_TEAM), so they can be assigned before they first sign in."""
+        if not AUTH_ID.match(tenant_id):
+            return []
+        rows = self._get("users", {"tenant_id": f"eq.{tenant_id}", "select": "auth_id,email,role", "limit": str(MAX_TEAM)})
+        out = []
+        for r in rows:
+            aid = str(r.get("auth_id") or "")
+            if AUTH_ID.match(aid):
+                out.append(TeamMember(aid, str(r.get("email") or "")[:200], role_of(r.get("role"))))
+        return out
+
 
 class CachedDirectory:
     """Remembers answers for CACHE_SECONDS. `lookup` says whether the answer is fresh, so memberships are only re-synced then."""
@@ -113,6 +136,18 @@ class CachedDirectory:
         with self._lock:
             self._cache[auth_id] = (now + self.seconds, person)
         return person, True
+
+    def team(self, tenant_id: str) -> tuple[list[TeamMember], bool]:
+        """A tenant's people, cached like `lookup`. Says whether the answer is fresh."""
+        key, now = f"team:{tenant_id}", self.clock()
+        with self._lock:
+            hit = self._cache.get(key)
+            if hit and hit[0] > now:
+                return hit[1], False  # type: ignore[return-value]
+        people = self.inner.team(tenant_id)
+        with self._lock:
+            self._cache[key] = (now + self.seconds, people)  # type: ignore[assignment]
+        return people, True
 
     def forget(self, auth_id: str | None = None) -> None:
         with self._lock:

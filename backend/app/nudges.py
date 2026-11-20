@@ -20,7 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from . import branding, magic_link
+from . import branding, magic_link, notifications
 from . import models as m
 from .config import Settings, valid_timezone
 from .errors import Conflict
@@ -213,6 +213,8 @@ def run_nudges(sm: sessionmaker, settings: Settings, notifier: Notifier, now: dt
                 if ob.attention != "nudges_exhausted":
                     ob.attention = "nudges_exhausted"
                     summary.flagged += 1
+                    if not dry_run:
+                        notifications.client_gone_quiet(db, ob, rounds)
                     summary.details.append(f"{ob.title}: no reply after {rounds} reminders")
                 db.commit()
                 continue

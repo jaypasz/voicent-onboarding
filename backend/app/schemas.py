@@ -137,7 +137,7 @@ def step_out(ob: m.Onboarding, s: m.Step) -> dict:
     last = s.responses[-1] if s.responses else None
     return {
         "id": s.id, "key": s.key, "type": s.type, "title": s.title, "section": s.section, "position": s.position,
-        "visibility": s.visibility, "status": s.status, "assignee_contact_id": s.assignee_contact_id,
+        "visibility": s.visibility, "status": s.status, "assignee_contact_id": s.assignee_contact_id, "team_assignee_id": s.team_assignee_id,
         "due_at": s.due_at, "completed_at": s.completed_at, "config": cfg,
         "response": {"revision": last.revision, "data": last.data, "submitted_by": last.submitted_by, "submitted_at": last.submitted_at} if last else None,
         "revisions": len(s.responses),
@@ -152,6 +152,7 @@ def onboarding_summary(ob: m.Onboarding) -> dict:
         "id": ob.id, "client_id": ob.client_id, "title": ob.title, "layout": ob.layout, "status": ob.status,
         "started_at": ob.started_at, "completed_at": ob.completed_at, "last_activity_at": ob.last_activity_at,
         "nudges_paused": ob.nudges_paused, "attention": ob.attention, "provision_state": ob.provision_state,
+        "owner_member_id": ob.owner_member_id,
         "progress": {"done": sum(1 for s in live if s.status == "done"), "total": len(live)},
     }
 

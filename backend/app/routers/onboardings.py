@@ -6,7 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from .. import aios_sync, magic_link, models as m, provision, services
+from .. import aios_sync, magic_link, models as m, notifications, provision, services
 from .. import nudges as reminders
 from ..deps import Actor, Auth, Db, Org, Session
 from ..errors import NotFound
@@ -22,14 +22,18 @@ def _step(db: Session, org: str, onboarding_id: str, key: str) -> dict:
 
 
 @router.get("")
-def list_onboardings(status: str | None = None, client_id: str | None = None, db: Session = Db, org: str = Org):
-    return [onboarding_summary(o) for o in services.list_onboardings(db, org, status, client_id)]
+def list_onboardings(request: Request, status: str | None = None, client_id: str | None = None, mine: bool = False, db: Session = Db, org: str = Org):
+    """`mine=1`: only the onboardings you look after."""
+    owner = (request.state.member_id or "no-member") if mine else None
+    return [onboarding_summary(o) for o in services.list_onboardings(db, org, status, client_id, owner)]
 
 
 @router.post("", status_code=201)
-def create(body: OnboardingIn, db: Session = Db, org: str = Org):
+def create(body: OnboardingIn, request: Request, db: Session = Db, org: str = Org):
+    """Whoever makes it looks after it, until someone else is chosen."""
     return onboarding_detail(services.create_onboarding(
-        db, org, client_id=body.client_id, template_id=body.template_id, title=body.title, version=body.version, sections=body.sections, steps=body.steps))
+        db, org, client_id=body.client_id, template_id=body.template_id, title=body.title, version=body.version, sections=body.sections, steps=body.steps,
+        owner_member_id=request.state.member_id))
 
 
 @router.get("/{onboarding_id}")
@@ -163,6 +167,7 @@ def submit(onboarding_id: str, key: str, body: StepAnswerIn, request: Request, b
     """Jay records an answer for a step (on a call, or an internal task)."""
     aios_sync.kick(request, background, org, onboarding_id)
     provision.kick(request, background, org, onboarding_id)
+    notifications.kick(request, background)
     services.submit_step(db, org, onboarding_id, key, body.data, submitted_by=f"admin:{actor.label}", actor_kind="admin")
     return _step(db, org, onboarding_id, key)
 
@@ -171,6 +176,7 @@ def submit(onboarding_id: str, key: str, body: StepAnswerIn, request: Request, b
 def complete(onboarding_id: str, key: str, request: Request, background: BackgroundTasks, db: Session = Db, org: str = Org):
     aios_sync.kick(request, background, org, onboarding_id)
     provision.kick(request, background, org, onboarding_id)
+    notifications.kick(request, background)
     services.complete_step(db, org, onboarding_id, key)
     return _step(db, org, onboarding_id, key)
 
@@ -179,6 +185,7 @@ def complete(onboarding_id: str, key: str, request: Request, background: Backgro
 def skip(onboarding_id: str, key: str, request: Request, background: BackgroundTasks, db: Session = Db, org: str = Org):
     aios_sync.kick(request, background, org, onboarding_id)
     provision.kick(request, background, org, onboarding_id)
+    notifications.kick(request, background)
     services.skip_step(db, org, onboarding_id, key)
     return _step(db, org, onboarding_id, key)
 

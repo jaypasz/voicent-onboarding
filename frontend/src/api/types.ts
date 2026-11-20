@@ -134,6 +134,8 @@ export interface OnboardingSummary {
   nudges_paused: boolean
   attention: Attention
   provision_state: ProvisionState
+  /** The team member who looks after it. */
+  owner_member_id?: string | null
   progress: Progress
 }
 
@@ -145,6 +147,8 @@ export interface AdminStep {
   section: string
   position: number
   visibility: 'client' | 'internal'
+  /** Who on our side follows this step up. Never shown to the client. */
+  team_assignee_id?: string | null
   status: StepStatus
   assignee_contact_id: string | null
   due_at: string | null
@@ -279,4 +283,34 @@ export interface OrgSettings {
   reply_to_email: string
   sms_from: string
   email_from_preview: string | null
+}
+
+export interface TeamMember {
+  id: string
+  email: string
+  name: string
+  role: Role
+  source: 'voicent' | 'local'
+  is_you: boolean
+  notify_email: boolean | null
+}
+
+export interface Team {
+  /** Linked to a Voicent tenant: people and roles come from Voicent-App. */
+  linked: boolean
+  in_sync: boolean
+  can_manage: boolean
+  me: string | null
+  members: TeamMember[]
+  invites: { id: string; email: string; role: Role; invited_by: string; created_at: string }[]
+}
+
+export interface AppNotification {
+  id: string
+  kind: string
+  text: string
+  onboarding_id: string | null
+  step_key: string
+  read: boolean
+  created_at: string
 }

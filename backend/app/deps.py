@@ -30,7 +30,7 @@ def get_db(request: Request) -> Iterator[Session]:
 READS = {"GET", "HEAD", "OPTIONS"}
 
 
-def current_org(request: Request, actor: Actor = Depends(current_actor), db: Session = Depends(get_db, scope="function")) -> str:
+def _resolve_org(request: Request, actor: Actor, db: Session, viewers_may_write: bool) -> str:
     """The org this admin request acts for. A person acts for the orgs they belong to; nobody reaches another org's rows.
 
     - user: their memberships (copied from Voicent-App when tenancy is on, see tenancy.py, plus any made by seed). With
@@ -60,10 +60,11 @@ def current_org(request: Request, actor: Actor = Depends(current_actor), db: Ses
         else:
             raise HTTPException(400, "You belong to several organizations; send X-Org-Id.")
         request.state.role = role
-        if request.method not in READS and role == "viewer":
+        request.state.member_id = db.scalar(select(m.OrgMember.id).where(m.OrgMember.org_id == org, m.OrgMember.auth_user_id == actor.id))
+        if request.method not in READS and role == "viewer" and not viewers_may_write:
             raise HTTPException(403, "Your role lets you look but not change anything here.")
         return org
-    request.state.role, request.state.superuser = "admin", actor.kind == "local"
+    request.state.role, request.state.superuser, request.state.member_id = "admin", actor.kind == "local", None
     if actor.kind == "local":
         from . import services
 
@@ -78,6 +79,15 @@ def current_org(request: Request, actor: Actor = Depends(current_actor), db: Ses
     return ids[0]
 
 
+def current_org(request: Request, actor: Actor = Depends(current_actor), db: Session = Depends(get_db, scope="function")) -> str:
+    return _resolve_org(request, actor, db, viewers_may_write=False)
+
+
+def self_org(request: Request, actor: Actor = Depends(current_actor), db: Session = Depends(get_db, scope="function")) -> str:
+    """For what is a person's own (their notifications and their email preference): a viewer may change these too."""
+    return _resolve_org(request, actor, db, viewers_may_write=True)
+
+
 def admin_org(request: Request, org: str = Depends(current_org)) -> str:
     """For settings only an org's admins may change (its brand and senders)."""
     if request.state.role != "admin":
@@ -89,8 +99,9 @@ Db = Depends(get_db, scope="function")
 Auth = Depends(current_actor)
 Org = Depends(current_org)
 AdminOrg = Depends(admin_org)
+SelfOrg = Depends(self_org)
 
-__all__ = ["Actor", "AdminOrg", "Auth", "Db", "Org", "Session"]
+__all__ = ["Actor", "AdminOrg", "Auth", "Db", "Org", "SelfOrg", "Session"]
 
 
 # ---------------------------------------------------------------- the client side
