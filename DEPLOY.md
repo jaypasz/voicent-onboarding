@@ -1,6 +1,6 @@
 # Deploy: Railway + Supabase
 
-One Railway service builds the `Dockerfile` (React build, then FastAPI serving the app and `/api`). Supabase supplies Postgres, admin login and file storage. `railway.json` sets the health check (`/api/health`). Not deployed yet.
+One Railway service builds the `Dockerfile` (React build, then FastAPI serving the app and `/api`). Supabase supplies Postgres, admin login and file storage. `railway.json` sets the health check (`/api/health`). Deployed on Railway (2026-11-20).
 
 ## Variables (Railway service > Variables)
 
