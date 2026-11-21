@@ -15,6 +15,7 @@ import SettingsPage from './admin/SettingsPage'
 import TeamPage from './admin/TeamPage'
 import TemplateBuilderPage from './admin/TemplateBuilderPage'
 import TemplatesPage from './admin/TemplatesPage'
+import TasksPage from './admin/TasksPage'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import Login from './auth/Login'
 import PortalPage from './portal/PortalPage'
@@ -43,6 +44,7 @@ export default function App() {
             </Route>
             <Route path="clients" element={<ClientsPage />} />
             <Route path="clients/:id" element={<ClientDetail />} />
+            <Route path="tasks" element={<TasksPage />} />
             <Route path="templates" element={<TemplatesPage />} />
             <Route path="templates/new" element={<TemplateBuilderPage key="new" />} />
             <Route path="templates/:id/edit" element={<TemplateBuilderPage key="edit" />} />

@@ -8,7 +8,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy import true as sa_true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -99,9 +99,23 @@ class Client(Stamped, Base):
     # Set when Jay marks the client as paying. A Voicent workspace is only ever asked for once a client pays: a prospect who
     # finishes onboarding but never pays stays a lead, and leads are kept out of Voicent-App.
     paying_since: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The one stage that can't be worked out from the rest: Jay's call that a prospect is lost or has gone quiet. Cleared with null.
+    outcome: Mapped[str | None] = mapped_column(String(10), nullable=True)  # lost | stalled
 
     contacts: Mapped[list["Contact"]] = relationship(back_populates="client", cascade="all, delete-orphan")
     onboardings: Mapped[list["Onboarding"]] = relationship(back_populates="client")
+
+    @property
+    def stage(self) -> str:
+        """Where the client is in the pipeline, worked out from what already exists so it can't drift: lost or stalled when Jay
+        said so, won once paying, onboarding while one is under way (active or paused), otherwise still a lead."""
+        if self.outcome:
+            return self.outcome
+        if self.paying_since:
+            return "won"
+        if any(o.status in ("active", "paused") for o in self.onboardings):
+            return "onboarding"
+        return "lead"
 
 
 class Contact(Stamped, Base):
@@ -329,3 +343,19 @@ class Notification(Stamped, Base):
     read_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # none (not wanted) | pending | sending (claimed by one sender) | sent | failed
     email_state: Mapped[str] = mapped_column(String(20), default="none", server_default="none")
+
+
+class Task(Stamped, Base):
+    """A to-do for the team, about a client and optionally one of their onboardings. Ours alone: never shown to a client, never
+    sent to Voicent-App or the AIOS board. Separate from onboarding steps, which are what the client works through."""
+
+    __tablename__ = "tasks"
+    __table_args__ = (Index("ix_tasks_org_done_due", "org_id", "done_at", "due_on"),)
+
+    org_id: Mapped[str] = org_fk()
+    client_id: Mapped[str] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    onboarding_id: Mapped[str | None] = mapped_column(ForeignKey("onboardings.id", ondelete="CASCADE"), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    assignee_id: Mapped[str | None] = mapped_column(ForeignKey("org_members.id", ondelete="SET NULL"), nullable=True, index=True)
+    due_on: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    done_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

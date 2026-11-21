@@ -14,6 +14,7 @@ const ITEMS = [
   { to: '/', label: 'Onboardings', icon: 'list', end: true },
   { to: '/new', label: 'New onboarding', icon: 'plus' },
   { to: '/clients', label: 'Clients', icon: 'users' },
+  { to: '/tasks', label: 'Tasks', icon: 'approval' },
   { to: '/templates', label: 'Templates', icon: 'layers' },
   { to: '/notifications', label: 'Notifications', icon: 'bell' },
   { to: '/team', label: 'Team', icon: 'team' },

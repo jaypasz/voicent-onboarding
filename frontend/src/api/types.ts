@@ -102,7 +102,23 @@ export interface Client {
   created_at: string
   /** Set when marked as a paying customer. Only paying clients get a Voicent workspace. */
   paying_since: string | null
+  /** Jay's call that a prospect is lost or has gone quiet. Every other stage is worked out by the server. */
+  outcome: 'lost' | 'stalled' | null
+  stage: Stage
   contacts: Contact[]
+}
+
+export type Stage = 'lead' | 'onboarding' | 'won' | 'lost' | 'stalled'
+
+export interface Task {
+  id: string
+  client_id: string
+  onboarding_id: string | null
+  title: string
+  assignee_id: string | null
+  due_on: string | null
+  done_at: string | null
+  created_at: string
 }
 
 export interface TemplateSummary {

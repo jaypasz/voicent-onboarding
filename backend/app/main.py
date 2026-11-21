@@ -19,7 +19,7 @@ from .db import Base, make_engine
 from .errors import ServiceError
 from .provision import Sender as ProvisionSender
 from .ratelimit import RateLimiter
-from .routers import clients, health, onboardings, org, portal, team, templates
+from .routers import clients, health, onboardings, org, portal, tasks, team, templates
 from .storage import Storage
 from .voicent_directory import CachedDirectory, VoicentDirectory
 
@@ -72,7 +72,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["Authorization", "Content-Type", "X-Org-Id"],
     )
 
-    for r in (health.router, org.router, team.router, clients.router, templates.router, onboardings.router, portal.router):
+    for r in (health.router, org.router, team.router, clients.router, tasks.router, templates.router, onboardings.router, portal.router):
         app.include_router(r, prefix="/api")
     _serve_frontend(app, settings.static_dir)
 

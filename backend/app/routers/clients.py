@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, BackgroundTasks, Request
 from pydantic import BaseModel
 
@@ -11,8 +13,8 @@ router = APIRouter(prefix="/clients", tags=["clients"])
 
 
 @router.get("", response_model=list[ClientOut])
-def list_clients(status: str | None = None, db: Session = Db, org: str = Org):
-    return services.list_clients(db, org, status)
+def list_clients(status: str | None = None, stage: str | None = None, db: Session = Db, org: str = Org):
+    return services.list_clients(db, org, status, stage)
 
 
 @router.post("", response_model=ClientOut, status_code=201)
@@ -53,3 +55,13 @@ def set_paying(client_id: str, body: PayingIn, request: Request, background: Bac
     for oid in queued:
         provision.kick(request, background, org, oid)
     return client
+
+
+class OutcomeIn(BaseModel):
+    outcome: Literal["lost", "stalled"] | None = None
+
+
+@router.post("/{client_id}/outcome", response_model=ClientOut)
+def set_outcome(client_id: str, body: OutcomeIn, db: Session = Db, org: str = Org):
+    """Mark a prospect lost or stalled, or null to take it back. Every other stage follows from what exists."""
+    return services.set_client_outcome(db, org, client_id, body.outcome)

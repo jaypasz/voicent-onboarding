@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 TABLES = {
     "orgs", "org_members", "clients", "contacts", "templates", "template_versions", "onboardings", "steps",
-    "responses", "files", "step_comments", "magic_links", "nudges", "sync_log", "org_invites", "notifications",
+    "responses", "files", "step_comments", "magic_links", "nudges", "sync_log", "org_invites", "notifications", "tasks",
 }
 
 

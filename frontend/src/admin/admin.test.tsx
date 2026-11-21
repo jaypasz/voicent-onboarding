@@ -112,7 +112,7 @@ const panels = {
 
 describe('OnboardingDetail', () => {
   const client: Client = {
-    id: 'cl1', name: 'Acme Plumbing', kind: 'trades', status: 'active', notes: '', timezone: 'America/New_York', created_at: '2026-11-01T00:00:00Z', paying_since: null,
+    id: 'cl1', name: 'Acme Plumbing', kind: 'trades', status: 'active', notes: '', timezone: 'America/New_York', created_at: '2026-11-01T00:00:00Z', paying_since: null, outcome: null, stage: 'lead',
     contacts: [{ id: 'c1', client_id: 'cl1', name: 'Pat Owner', email: '', phone: '', role: 'owner', sms_consent: false, sms_consent_source: '' }],
   }
   const draft: OnboardingDetail = {
