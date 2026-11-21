@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
+import hashlib
+import json
 import re
 
 from sqlalchemy import func, select
@@ -530,12 +532,22 @@ def locked_step_keys(ob: m.Onboarding) -> list[str]:
     return [s.key for s in ob.steps if _has_data(s)]
 
 
-def update_onboarding_steps(db: Session, org_id: str, onboarding_id: str, *, sections: list, steps: list) -> m.Onboarding:
-    """Replace a draft onboarding's sections and steps. Only drafts: once the client has a link, the AIOS tasks, the
-    completion check and the client's own progress all depend on the steps, so they stay as they were sent."""
+def document_etag(doc: dict) -> str:
+    """A fingerprint of an onboarding's steps, so a save made from a stale screen is refused instead of overwriting someone else's edit."""
+    return hashlib.sha256(json.dumps(doc, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+def update_onboarding_steps(db: Session, org_id: str, onboarding_id: str, *, sections: list, steps: list, etag: str | None = None) -> m.Onboarding:
+    """Replace an onboarding's sections and steps. A draft can change freely; after sending, the same rules hold (a step that
+    holds answers, files or comments can be edited but not removed or retyped; skip it instead) and what depends on the steps is
+    brought in line: new steps get due dates from the start, the onboarding reopens when it gains an open step or finishes when
+    it loses the last one, and the AIOS sync follows. Only an archived onboarding is closed to changes."""
     ob = _onboarding(db, org_id, onboarding_id)
-    if ob.status != "draft":
-        raise Conflict(f"Steps can only be changed while the onboarding is a draft; this one is {ob.status}.")
+    if ob.status == "archived":
+        raise Conflict("This onboarding is archived, so its steps can't change.")
+    if etag is not None and etag != document_etag(ob.document):
+        raise Conflict("These steps were changed by someone else after you opened them. Reload to see their changes, then make yours again.")
+    sent = ob.status != "draft"
     doc = _with_steps(ob.document, sections, steps)
     wanted = {d["key"]: d for d in doc["steps"]}
     existing = {s.key: s for s in ob.steps}
@@ -544,7 +556,7 @@ def update_onboarding_steps(db: Session, org_id: str, onboarding_id: str, *, sec
         if not _has_data(s):
             continue
         if key not in wanted:
-            problems.append(f"'{s.title}' already has answers, files or comments, so it can't be removed.")
+            problems.append(f"'{s.title}' already has answers, files or comments, so it can't be removed." + (" Skip it instead." if sent else ""))
         elif wanted[key]["type"] != s.type:
             problems.append(f"'{s.title}' already has answers, files or comments, so its type can't change.")
     if problems:
@@ -558,6 +570,8 @@ def update_onboarding_steps(db: Session, org_id: str, onboarding_id: str, *, sec
         s = existing.get(d["key"])
         if s is None:
             s = m.Step(org_id=org_id, key=d["key"], assignee_contact_id=_assignee(contacts, d["assignee_role"]))
+            if sent and d.get("due_offset_days") is not None and ob.started_at:
+                s.due_at = ob.started_at + dt.timedelta(days=d["due_offset_days"])  # counted from kickoff, as at sending
             ob.steps.append(s)
         elif old_roles.get(d["key"], "") != d["assignee_role"]:
             s.assignee_contact_id = _assignee(contacts, d["assignee_role"])
@@ -567,7 +581,20 @@ def update_onboarding_steps(db: Session, org_id: str, onboarding_id: str, *, sec
     ob.sync_version += 1
     db.flush()
     db.expire(ob, ["steps"])  # reload in position order
+    if sent:
+        _reconcile_status(db, ob)
     return ob
+
+
+def _reconcile_status(db: Session, ob: m.Onboarding) -> None:
+    """After steps were added or removed: a finished onboarding that gained an open step is active again (a delivery to
+    Voicent-App already made stays made; provision.queue never sends twice), and an active one with nothing left to do is finished.
+    Editing is not client activity, so the quiet-client timer is left alone."""
+    if ob.status == "completed" and any(s.status not in ("done", "skipped") for s in ob.steps):
+        ob.status, ob.completed_at = "active", None
+    else:
+        _complete_if_finished(db, ob)
+    db.flush()
 
 
 def _recheck_answer(step: m.Step, config: dict) -> None:
@@ -754,6 +781,11 @@ def _set_step_status(ob: m.Onboarding, step: m.Step, status: str) -> None:
 def _after_change(db: Session, ob: m.Onboarding) -> None:
     ob.last_activity_at = now()
     ob.sync_version += 1  # AIOS needs to hear about this
+    _complete_if_finished(db, ob)
+    db.flush()
+
+
+def _complete_if_finished(db: Session, ob: m.Onboarding) -> None:
     if ob.status == "active" and ob.steps and all(s.status in ("done", "skipped") for s in ob.steps):
         ob.status, ob.completed_at = "completed", now()
         if ob.client_id:  # wait for, then re-read, a payment being marked at this moment (see set_client_paying)

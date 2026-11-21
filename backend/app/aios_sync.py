@@ -137,7 +137,8 @@ def _reconcile(db: Session, settings: Settings, aios: AiosClient, org_id: str, o
             db.commit()
             changes += 1
 
-        existing: dict[str, dict] | None = None
+        # One read per pass: finds a task whose creation reply was lost, notices a renamed step, and finds tasks of removed steps.
+        existing: dict[str, dict] | None = {t["link"]: t for t in aios.list_tasks(pid) if t.get("link")} if ob.aios_project_id else None
         for s in ob.steps:
             desired = STEP_TO_TASK[s.status]
             assignee = names.get(s.assignee_contact_id) if s.assignee_contact_id else None
@@ -153,7 +154,9 @@ def _reconcile(db: Session, settings: Settings, aios: AiosClient, org_id: str, o
                     s.aios_task_id, s.aios_status = aios.create_task(body)["id"], desired
                 db.commit()
                 changes += 1
-            if s.aios_status != desired:
+            there = (existing or {}).get(step_link(settings, ob, s))
+            renamed = there is not None and (there.get("title") != task_title(s) or there.get("notes") != task_notes(ob, s, assignee))
+            if s.aios_status != desired or renamed:
                 aios.patch_task(s.aios_task_id, {"status": desired, "title": task_title(s), "notes": task_notes(ob, s, assignee)})
                 s.aios_status = desired
                 db.commit()
@@ -165,6 +168,14 @@ def _reconcile(db: Session, settings: Settings, aios: AiosClient, org_id: str, o
                     changes += 1
                 s.aios_comment_revision = last.revision
                 db.commit()
+
+        # A step that was removed after sending leaves its task behind: close it rather than leave "Waiting on client" forever.
+        current = {step_link(settings, ob, s) for s in ob.steps}
+        prefix = f"{settings.app_url}/onboardings/{ob.id}#step-"
+        for link, t in (existing or {}).items():
+            if link.startswith(prefix) and link not in current and t.get("status") != "done":
+                aios.patch_task(t["id"], {"status": "done", "title": f"(Removed from the onboarding) {t.get('title', '')}"[:200]})
+                changes += 1
 
         db.execute(update(m.Onboarding).where(m.Onboarding.id == ob.id, m.Onboarding.synced_version < version).values(synced_version=version))
         if changes:

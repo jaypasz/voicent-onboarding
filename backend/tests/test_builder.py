@@ -70,15 +70,77 @@ def test_steps_with_answers_keep_their_place_and_type(client):
     assert basics["title"] == "About you" and basics["response"]["data"] == {"answers": {"name": "Pat"}}
 
 
-def test_only_a_draft_can_be_edited(client):
+def test_an_archived_onboarding_cannot_be_edited_but_a_sent_one_can(client):
     t, cl = setup_client(client, {})
     ob = create(client, t, cl).json()
     client.post(f"/api/onboardings/{ob['id']}/send")
     doc = client.get(f"/api/onboardings/{ob['id']}/document").json()
+    assert doc["editable"] is True and doc["sent"] is True
+    r = client.put(f"/api/onboardings/{ob['id']}/document", json={"steps": doc["document"]["steps"][:2]})
+    assert r.status_code == 200 and len(client.get(f"/api/onboardings/{ob['id']}").json()["steps"]) == 2
+    client.post(f"/api/onboardings/{ob['id']}/archive")
+    doc = client.get(f"/api/onboardings/{ob['id']}/document").json()
     assert doc["editable"] is False
-    r = client.put(f"/api/onboardings/{ob['id']}/document", json={"steps": doc["document"]["steps"][:1]})
-    assert r.status_code == 409 and "draft" in r.json()["detail"]
-    assert len(client.get(f"/api/onboardings/{ob['id']}").json()["steps"]) == 3
+    r = client.put(f"/api/onboardings/{ob['id']}/document", json={"steps": doc["document"]["steps"]})
+    assert r.status_code == 409 and "archived" in r.json()["detail"]
+
+
+def _sent(client):
+    t, cl = setup_client(client, {})
+    ob = create(client, t, cl).json()
+    client.post(f"/api/onboardings/{ob['id']}/send")
+    return ob["id"], client.get(f"/api/onboardings/{ob['id']}/document").json()
+
+
+def test_after_sending_steps_can_be_added_reordered_and_edited_and_new_ones_get_due_dates(client):
+    oid, doc = _sent(client)
+    steps = doc["document"]["steps"]
+    extra = {"key": "logo", "type": "upload", "title": "Your logo", "due_offset_days": 3, "config": {"accept": ["png"]}}
+    r = client.put(f"/api/onboardings/{oid}/document", json={"steps": [extra, steps[2], steps[0], steps[1]]})
+    assert r.status_code == 200, r.text
+    got = client.get(f"/api/onboardings/{oid}").json()["steps"]
+    assert [s["key"] for s in got] == ["logo", "build", "basics", "approve"]
+    logo = next(s for s in got if s["key"] == "logo")
+    assert logo["due_at"] is not None and logo["status"] == "pending"
+
+
+def test_a_step_with_answers_cannot_be_removed_after_sending_and_the_message_says_to_skip_it(client):
+    oid, doc = _sent(client)
+    client.put(f"/api/onboardings/{oid}/steps/basics", json={"data": {"answers": {"name": "Pat"}}})
+    r = client.put(f"/api/onboardings/{oid}/document", json={"steps": [s for s in doc["document"]["steps"] if s["key"] != "basics"]})
+    assert r.status_code == 409 and "Skip it instead" in r.json()["problems"][0]
+    assert client.post(f"/api/onboardings/{oid}/steps/basics/skip").status_code == 200
+
+
+def test_adding_a_step_reopens_a_finished_onboarding_and_removing_the_last_open_step_finishes_it(client):
+    oid, doc = _sent(client)
+    steps = doc["document"]["steps"]
+    for k in ("basics", "approve", "build"):
+        client.post(f"/api/onboardings/{oid}/steps/{k}/{'skip' if k != 'build' else 'complete'}")
+    assert client.get(f"/api/onboardings/{oid}").json()["status"] == "completed"
+    extra = {"key": "logo", "type": "upload", "title": "Your logo", "config": {"accept": ["png"]}}
+    r = client.put(f"/api/onboardings/{oid}/document", json={"steps": steps + [extra]})
+    assert r.status_code == 200 and r.json()["status"] == "active"
+    r = client.put(f"/api/onboardings/{oid}/document", json={"steps": steps})  # the new step is untouched, so it can go again
+    assert r.status_code == 200 and r.json()["status"] == "completed"
+
+
+def test_editing_is_not_client_activity(client):
+    oid, doc = _sent(client)
+    before = client.get(f"/api/onboardings/{oid}").json()["last_activity_at"]
+    client.put(f"/api/onboardings/{oid}/document", json={"steps": list(reversed(doc["document"]["steps"]))})
+    assert client.get(f"/api/onboardings/{oid}").json()["last_activity_at"] == before
+
+
+def test_a_save_from_a_stale_screen_is_refused(client):
+    oid, doc = _sent(client)
+    steps = doc["document"]["steps"]
+    ok = client.put(f"/api/onboardings/{oid}/document", json={"steps": steps[:2], "etag": doc["etag"]})
+    assert ok.status_code == 200
+    stale = client.put(f"/api/onboardings/{oid}/document", json={"steps": steps, "etag": doc["etag"]})
+    assert stale.status_code == 409 and "changed by someone else" in stale.json()["detail"]
+    fresh = client.get(f"/api/onboardings/{oid}/document").json()
+    assert client.put(f"/api/onboardings/{oid}/document", json={"steps": steps, "etag": fresh["etag"]}).status_code == 200
 
 
 def test_the_name_slug_and_on_complete_are_not_customised(client):

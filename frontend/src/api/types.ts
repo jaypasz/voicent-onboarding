@@ -258,8 +258,13 @@ export interface ProvisionStatus {
 /** An onboarding's own copy of its template, for the step builder. */
 export interface OnboardingDocument {
   document: TemplateDoc
+  /** False only for an archived onboarding. */
   editable: boolean
+  /** Already sent to the client: saved changes are live at once. */
+  sent: boolean
   locked: string[]
+  /** Which version of the steps this screen is looking at; sent back so a stale save is refused. */
+  etag: string
 }
 
 export interface TemplateCheck {

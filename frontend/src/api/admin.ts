@@ -77,7 +77,7 @@ export const fetchTemplateYaml = (id: string) => request<string>(`/templates/${i
 export const useCreateOnboarding = () =>
   useWrite((b: { client_id: string; template_id: string; title?: string; sections?: SectionDoc[]; steps?: StepDoc[] }) => request<OnboardingDetail>('/onboardings', { body: b }), () => [k.onboardings])
 export const useSaveOnboardingSteps = (id: string) =>
-  useWrite((b: { sections: SectionDoc[]; steps: StepDoc[] }) => request<OnboardingDetail & OnboardingDocument>(`/onboardings/${id}/document`, { method: 'PUT', body: b }),
+  useWrite((b: { sections: SectionDoc[]; steps: StepDoc[]; etag?: string }) => request<OnboardingDetail & OnboardingDocument>(`/onboardings/${id}/document`, { method: 'PUT', body: b }),
     () => [k.onboarding(id), k.onboardings, ['document', id]])
 
 export const useSaveTemplate = () =>

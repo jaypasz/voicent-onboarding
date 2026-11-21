@@ -106,6 +106,8 @@ class OnboardingIn(BaseModel):
 class OnboardingStepsIn(BaseModel):
     sections: list[Any] = Field(default_factory=list, max_length=20)
     steps: list[Any] = Field(max_length=100)
+    # What the editor was looking at (from GET /document). If the steps changed since, the save is refused.
+    etag: str | None = Field(default=None, max_length=64)
 
 
 class StepAnswerIn(BaseModel):
