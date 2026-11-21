@@ -9,6 +9,7 @@ import { memberLabel } from '../lib/team'
 import { Banner } from '../components/Banner'
 import { LoadError } from '../components/LoadError'
 import { ProgressBar } from '../components/ProgressBar'
+import { StepTracker } from '../components/StepTracker'
 import { StepBadge } from '../components/StatusBadge'
 import { dueLabel, formatDateTime } from '../lib/format'
 import StepResponse from './StepResponse'
@@ -141,6 +142,7 @@ export default function OnboardingDetail() {
   return (
     <div className="stack">
       <ProgressBar progress={o.progress} />
+      <StepTracker steps={o.steps} />
       {members.length > 0 && (
         <div className="owner-row">
           <TeamSelect label="Looked after by" value={o.owner_member_id} members={members} disabled={owner.isPending}
