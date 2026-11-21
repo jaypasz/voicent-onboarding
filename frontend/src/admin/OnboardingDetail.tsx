@@ -35,14 +35,18 @@ function AdminStepCard({ id, step, contact, members }: { id: string; step: Admin
   const ours = members.find((m) => m.id === step.team_assignee_id)
   const action = useStepAction(id)
   const answer = useAnswerStep(id)
+  // our own task: it is ours to work through here, so it is open and gets the checklist and a note box
+  const teamTask = step.type === 'task' && step.visibility === 'internal'
   const comment = useAdminComment(id)
   // Open when there is something to read or do: an answer, work in progress, or your own internal task.
-  const [open, setOpen] = useState(step.response !== null || step.status === 'in_progress' || step.type === 'internal_task')
+  const [open, setOpen] = useState(step.response !== null || step.status === 'in_progress' || teamTask)
   const [note, setNote] = useState('')
   const [text, setText] = useState('')
   const [visible, setVisible] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const due = dueLabel(step.due_at, step.status)
+  const items: string[] = step.type === 'task' ? step.config.checklist ?? [] : []
+  const ticked: number[] = (step.response?.data.checked as number[] | undefined) ?? []
   const run = async (fn: () => Promise<unknown>) => { setError(null); try { await fn() } catch (e) { setError(errText(e)) } }
 
   async function send(e: FormEvent) {
@@ -71,18 +75,25 @@ function AdminStepCard({ id, step, contact, members }: { id: string; step: Admin
             <TeamSelect label="Followed up by (our side)" value={step.team_assignee_id} members={members} disabled={follower.isPending}
               onChange={(member_id) => void run(() => follower.mutateAsync({ key: step.key, member_id }))} />
           )}
-          {step.type === 'internal_task' && (step.config.checklist ?? []).length > 0 && (
-            <ul>{(step.config.checklist as string[]).map((c) => <li key={c}>{c}</li>)}</ul>
+          {teamTask && step.config.instructions && <p style={{ whiteSpace: 'pre-wrap' }}>{step.config.instructions}</p>}
+          {teamTask && items.length > 0 && (
+            <ul className="checklist" aria-label="Checklist">{items.map((c, i) => (
+              <li key={c}><label className="check">
+                <input type="checkbox" checked={ticked.includes(i)} disabled={answer.isPending}
+                  onChange={(e) => void run(() => answer.mutateAsync({ key: step.key, data: { checked: e.target.checked ? [...new Set([...ticked, i])] : ticked.filter((x) => x !== i) } }))} /> <span>{c}</span>
+              </label></li>
+            ))}</ul>
           )}
-          <StepResponse onboardingId={id} step={step} />
+          {!teamTask && <StepResponse onboardingId={id} step={step} />}
+          {teamTask && step.response?.data.note && <p>{step.response.data.note}</p>}
           <div className="row wrap">
-            {step.status !== 'done' && step.type === 'internal_task' && (
+            {step.status !== 'done' && teamTask && (
               <>
                 <label className="field-group grow"><span>Note (optional)</span><input value={note} onChange={(e) => setNote(e.target.value)} /></label>
-                <button className="btn btn-primary" disabled={answer.isPending} onClick={() => run(() => answer.mutateAsync({ key: step.key, data: { note } }))}>Mark done</button>
+                <button className="btn btn-primary" disabled={answer.isPending} onClick={() => run(() => answer.mutateAsync({ key: step.key, data: { note, done: true, ...(items.length ? { checked: items.map((_, i) => i) } : {}) } }))}>Mark done</button>
               </>
             )}
-            {step.status !== 'done' && step.type !== 'internal_task' && <button className="btn" onClick={() => run(() => action.mutateAsync({ key: step.key, action: 'complete' }))}>Mark done</button>}
+            {step.status !== 'done' && !teamTask && <button className="btn" onClick={() => run(() => action.mutateAsync({ key: step.key, action: 'complete' }))}>Mark done</button>}
             {step.status !== 'skipped' && step.status !== 'done' && <button className="btn" onClick={() => run(() => action.mutateAsync({ key: step.key, action: 'skip' }))}>Skip</button>}
             {(step.status === 'done' || step.status === 'skipped') && <button className="btn" onClick={() => run(() => action.mutateAsync({ key: step.key, action: 'reopen' }))}>Reopen</button>}
           </div>

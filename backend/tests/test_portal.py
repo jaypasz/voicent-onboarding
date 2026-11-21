@@ -27,8 +27,8 @@ DOC = {
         {"key": "logo", "type": "upload", "title": "Logo", "section": "a",
          "config": {"accept": ["png", "pdf"], "max_mb": 1, "min_files": 1, "max_files": 2}},
         {"key": "approve", "type": "approval", "title": "Approve", "section": "a", "config": {"deliverable": {"kind": "text", "text": "Hello"}}},
-        {"key": "secret_build", "type": "internal_task", "title": "Internal build notes", "section": "z",
-         "config": {"notes": "margin is 40%", "checklist": ["call the supplier"]}},
+        {"key": "secret_build", "type": "task", "title": "Internal build notes", "section": "z",
+         "config": {"audience": "team", "instructions": "margin is 40%", "checklist": ["call the supplier"]}},
     ],
 }
 

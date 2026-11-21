@@ -350,15 +350,14 @@ class Notification(Stamped, Base):
 
 
 class Task(Stamped, Base):
-    """A to-do for the team, about a client and optionally one of their onboardings. Ours alone: never shown to a client, never
-    sent to Voicent-App or the AIOS board. Separate from onboarding steps, which are what the client works through."""
+    """A standalone to-do for the team about a client ("chase the invoice"). Ours alone: never shown to a client, never sent to
+    Voicent-App or the AIOS board. Work that belongs to an onboarding is a team `task` step in its flow instead."""
 
     __tablename__ = "tasks"
     __table_args__ = (Index("ix_tasks_org_done_due", "org_id", "done_at", "due_on"),)
 
     org_id: Mapped[str] = org_fk()
     client_id: Mapped[str] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
-    onboarding_id: Mapped[str | None] = mapped_column(ForeignKey("onboardings.id", ondelete="CASCADE"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(200))
     assignee_id: Mapped[str | None] = mapped_column(ForeignKey("org_members.id", ondelete="SET NULL"), nullable=True, index=True)
     due_on: Mapped[dt.date | None] = mapped_column(Date, nullable=True)

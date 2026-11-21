@@ -4,15 +4,20 @@ from fastapi import APIRouter, Request, Response
 
 from .. import services
 from ..deps import Db, Org, Session
-from ..schemas import TaskIn, TaskOut, TaskPatch
+from ..schemas import TaskIn, TaskOut, TaskPatch, TeamStepTaskOut
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
 @router.get("", response_model=list[TaskOut])
-def list_tasks(client_id: str | None = None, onboarding_id: str | None = None, assignee_id: str | None = None,
+def list_tasks(client_id: str | None = None, assignee_id: str | None = None,
                done: bool | None = None, db: Session = Db, org: str = Org):
-    return services.list_tasks(db, org, client_id=client_id, onboarding_id=onboarding_id, assignee_id=assignee_id, done=done)
+    return services.list_tasks(db, org, client_id=client_id, assignee_id=assignee_id, done=done)
+
+
+@router.get("/in-onboardings", response_model=list[TeamStepTaskOut])
+def list_team_steps(assignee_id: str | None = None, done: bool | None = None, db: Session = Db, org: str = Org):
+    return services.list_team_steps(db, org, assignee_id=assignee_id, done=done)
 
 
 @router.post("", response_model=TaskOut, status_code=201)

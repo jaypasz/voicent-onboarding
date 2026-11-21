@@ -5,6 +5,8 @@ type Config = Record<string, any>
 interface Props {
   config: Config
   onChange: (c: Config) => void
+  /** The step already holds answers, files or comments. */
+  locked?: boolean
 }
 
 /** Sets a key, or removes it when the value is empty, so optional settings don't fail the server's checks. */
@@ -176,19 +178,27 @@ function ConnectConfig({ config, onChange }: Props) {
   )
 }
 
-function InternalTaskConfig({ config, onChange }: Props) {
+function TaskConfig({ config, onChange, locked }: Props) {
   // like the choices box: it keeps exactly what was typed (a new line, a trailing space); the document gets the non-empty lines
   const [checklistText, setChecklistText] = useState(() => (config.checklist ?? []).join('\n'))
+  const id = useId()
   return (
     <div className="stack">
-      <Text label="Notes" area value={config.notes} onChange={(v) => onChange(put(config, 'notes', v))} />
+      <label className="field-group" htmlFor={id}><span>Who does it</span>
+        <select id={id} value={config.audience ?? 'client'} disabled={locked} onChange={(e) => onChange({ ...config, audience: e.target.value })}>
+          <option value="client">The client (they see it in their portal)</option>
+          <option value="team">Our team (only you see it)</option>
+        </select>
+      </label>
+      {locked && <p className="help">It already has answers or comments, so who it is for can't change.</p>}
+      <Text label="Instructions" area value={config.instructions} onChange={(v) => onChange(put(config, 'instructions', v))} />
       <Text label="Checklist, one item per line" area value={checklistText} onChange={(v) => { setChecklistText(v); onChange(put(config, 'checklist', lines(v))) }} />
     </div>
   )
 }
 
 const EDITORS: Record<string, (p: Props) => React.JSX.Element> = {
-  form: FormConfig, upload: UploadConfig, approval: ApprovalConfig, book_call: BookCallConfig, connect: ConnectConfig, internal_task: InternalTaskConfig,
+  form: FormConfig, upload: UploadConfig, approval: ApprovalConfig, book_call: BookCallConfig, connect: ConnectConfig, task: TaskConfig,
 }
 
 export function ConfigEditor({ type, ...p }: Props & { type: string }) {
