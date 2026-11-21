@@ -19,6 +19,8 @@ export default function OnboardingStepsPage() {
   const [ok, setOk] = useState(false)
   const [etag, setEtag] = useState<string | undefined>(undefined)
   const [stale, setStale] = useState(false)
+  const [notify, setNotify] = useState(true)
+  const [noticeQueued, setNoticeQueued] = useState<boolean | null>(null)
 
   useEffect(() => {
     if (doc.data && !value) { setValue({ sections: doc.data.document.sections, steps: prepare(doc.data.document.steps) }); setEtag(doc.data.etag); setStale(false) }
@@ -34,9 +36,10 @@ export default function OnboardingStepsPage() {
     setOk(false)
     setStale(false)
     try {
-      const r = await save.mutateAsync({ sections: value!.sections, steps: clean(value!.steps), etag })
+      const r = await save.mutateAsync({ sections: value!.sections, steps: clean(value!.steps), etag, ...(d.sent ? { notify_client: notify } : {}) })
       setValue({ sections: r.document.sections, steps: prepare(r.document.steps) })
       setEtag(r.etag)
+      setNoticeQueued(r.client_notice_pending)
       setDirty(false)
       setOk(true)
     } catch (e) {
@@ -60,11 +63,15 @@ export default function OnboardingStepsPage() {
       {d.editable ? (
         <>
           <p className="help">These changes are for this client only. The template “{d.document.name}” stays as it is.</p>
+          {(noticeQueued ?? d.client_notice_pending) && <Banner>The client will be told about your changes in a few minutes, in one message. Further edits in the meantime are included.</Banner>}
           {d.sent && <Banner kind="warn">This onboarding has been sent, so the client sees saved changes straight away. A step that already has answers, files or comments can be edited but not removed: skip it instead.</Banner>}
           {problems.length > 0 && <Problems problems={problems} />}
           <StepsBuilder value={value} onChange={(v) => { setValue(v); setDirty(true); setOk(false) }} locked={d.locked} />
           {stale && <button type="button" className="btn btn-small" onClick={() => void reload()}>Reload the latest steps</button>}
           {ok && <Banner kind="ok">{d.sent ? 'Saved. The client sees these changes now.' : 'Saved. The client sees these steps when you send the onboarding.'}</Banner>}
+          {d.sent && (
+            <label className="check"><input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} /> Tell the client about these changes (one message, a few minutes after you stop editing). Untick for a typo fix.</label>
+          )}
           <div className="row wrap save-bar">
             <button type="button" className="btn btn-primary" disabled={!dirty || save.isPending || value.steps.length === 0} onClick={() => void submit()}>
               {save.isPending ? 'Saving…' : d.sent ? 'Save changes' : 'Save steps'}
