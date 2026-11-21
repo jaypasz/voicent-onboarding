@@ -58,3 +58,11 @@ describe('uploads', () => {
     expect(fileProblem({ name: 'a.PNG', size: 1000 }, ['png'], 5)).toBeNull()
   })
 })
+
+test('a date with no time shows as that same day, and today is the local date', async () => {
+  const { formatDay, todayLocal } = await import('./format')
+  expect(formatDay('2026-12-01')).toBe(new Date(2026, 11, 1).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }))
+  expect(formatDay('')).toBe('')
+  expect(formatDay('nonsense')).toBe('')
+  expect(todayLocal(new Date(2026, 11, 1, 23, 30))).toBe('2026-12-01')
+})
