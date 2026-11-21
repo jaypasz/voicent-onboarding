@@ -248,4 +248,6 @@ input[type='checkbox'], input[type='radio'] { width: 22px; height: 22px; vertica
 .owner-row { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: flex-end; }
 
 /* ---- tasks */
+.task-meta { align-items: center; }
+.task select { width: auto; max-width: 14rem; }
 .task-done strong { text-decoration: line-through; color: var(--muted); }
