@@ -110,14 +110,18 @@ steps:
     due_offset_days: 4
     config: {url: "https://example.com/book", duration_minutes: 60}
   - key: internal_review
-    type: internal_task
+    type: task
     title: Review environment and security answers
     section: environment
     due_offset_days: 7
     config: {checklist: [Check identity provider and phone system, Flag compliance gaps, Draft the scope]}
+    config:
+      audience: team
   - key: provision
-    type: internal_task
+    type: task
     title: Provision the workspace
     section: access
     due_offset_days: 10
     config: {checklist: [Create tenant and workspace, Connect integrations, Run a test call]}
+    config:
+      audience: team

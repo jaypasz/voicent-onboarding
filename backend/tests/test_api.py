@@ -36,7 +36,7 @@ DOC = {
         {"key": "basics", "type": "form", "title": "Basics", "assignee_role": "owner", "due_offset_days": 2,
          "config": {"fields": [{"key": "name", "label": "Name", "type": "text", "required": True}]}},
         {"key": "approve", "type": "approval", "title": "Approve", "config": {"deliverable": {"kind": "text", "text": "Hello"}}},
-        {"key": "build", "type": "internal_task", "title": "Build it"},
+        {"key": "build", "type": "task", "title": "Build it", "config": {"audience": "team"}},
     ],
 }
 

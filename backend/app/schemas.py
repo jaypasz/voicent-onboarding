@@ -169,7 +169,6 @@ def onboarding_detail(ob: m.Onboarding) -> dict:
 
 class TaskIn(BaseModel):
     client_id: str
-    onboarding_id: str | None = None
     title: str = Field(min_length=1, max_length=200)
     assignee_id: str | None = None
     due_on: dt.date | None = None
@@ -186,9 +185,19 @@ class TaskOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
     client_id: str
-    onboarding_id: str | None
     title: str
     assignee_id: str | None
     due_on: dt.date | None
     done_at: dt.datetime | None
     created_at: dt.datetime
+
+
+class TeamStepTaskOut(BaseModel):
+    """A team task that lives in an onboarding's flow, shown on the Tasks page next to the standalone ones."""
+    onboarding_id: str
+    key: str
+    title: str
+    client_id: str
+    status: str
+    team_assignee_id: str | None
+    due_at: dt.datetime | None

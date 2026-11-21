@@ -39,7 +39,7 @@ One Railway service builds the Dockerfile and serves the React SPA and `/api`.
 
 ## Step types
 
-A registry (`app/steps/registry.py`); each type declares its config schema, validates and cleans responses, and says what status an accepted answer leaves the step in (`resulting_status`). Side effects such as AIOS comments arrive with the sync in a later phase. v1: `form`, `upload`, `connect`, `book_call`, `approval`, `internal_task`. Declared but not built: `credential_share`, `info_video`, `payment_link`.
+A registry (`app/steps/registry.py`); each type declares its config schema, validates and cleans responses, and says what status an accepted answer leaves the step in (`resulting_status`). Side effects such as AIOS comments arrive with the sync in a later phase. v1: `form`, `upload`, `connect`, `book_call`, `approval`, `task`. A `task` is for the client or for the team (`config.audience`, which also sets the step's visibility); a team task never reaches the portal, AIOS comments or Voicent-App, and the Tasks page lists team tasks from every onboarding under way beside the standalone `tasks` rows (to-dos about a client that aren't part of an onboarding). Declared but not built: `credential_share`, `info_video`, `payment_link`.
 
 ## Admin API (phase 2)
 

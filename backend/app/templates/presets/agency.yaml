@@ -90,14 +90,18 @@ steps:
     due_offset_days: 4
     config: {url: "https://example.com/book", duration_minutes: 45}
   - key: review_intake
-    type: internal_task
+    type: task
     title: Review the intake answers
     section: company
     due_offset_days: 4
     config: {checklist: [Check goals against the offer, Note the white-label fit, Flag anything unclear]}
+    config:
+      audience: team
   - key: create_workspace
-    type: internal_task
+    type: task
     title: Create the workspace and connect the integrations
     section: access
     due_offset_days: 7
     config: {checklist: [Create tenant and workspace, Connect GHL and Retell, Load the starter templates]}
+    config:
+      audience: team

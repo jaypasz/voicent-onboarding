@@ -26,6 +26,10 @@ class StepType:
     client_visible: bool = True
     config_schema: dict = {"type": "object"}
 
+    def visibility_for(self, config: dict) -> str:
+        """Who sees the step. Most types are always for the client or always internal; a type can decide from its settings."""
+        return "client" if self.client_visible else "internal"
+
     # --- template side ---
     def validate_config(self, config: Any) -> list[str]:
         problems = schema_problems(self.config_schema, config)

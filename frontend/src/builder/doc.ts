@@ -53,7 +53,6 @@ export interface StepKind {
   type: string
   label: string
   help: string
-  internal?: boolean
   make: () => Record<string, any>
 }
 
@@ -64,7 +63,7 @@ export const STEP_KINDS: StepKind[] = [
   { type: 'approval', label: 'Approval', help: 'The client signs off on something', make: () => ({ deliverable: { kind: 'text', text: '' } }) },
   { type: 'book_call', label: 'Book a call', help: 'A link to your booking page', make: () => ({ url: '', duration_minutes: 30 }) },
   { type: 'connect', label: 'Connect an account', help: 'Record that access was given', make: () => ({ provider: 'account', label: 'Your account', access_mode: 'delegated' }) },
-  { type: 'internal_task', label: 'Internal task', help: 'Only you see it', internal: true, make: () => ({ checklist: [] }) },
+  { type: 'task', label: 'Task', help: 'Something to do, for the client or for you', make: () => ({ audience: 'client', checklist: [] }) },
 ]
 
 export const kindOf = (type: string): StepKind | undefined => STEP_KINDS.find((k) => k.type === type)
@@ -126,14 +125,17 @@ export function newStep(type: string, taken: Iterable<string>): StepDoc {
   const title = kind ? kind.label : 'New step'
   return withFieldUids({
     _uid: uid(), _fresh: true,
-    key: uniqueKey(toKey(title), taken), type, title, description: '', section: '', visibility: kind?.internal ? 'internal' : 'client',
+    key: uniqueKey(toKey(title), taken), type, title, description: '', section: '', visibility: isInternal({ type, config: kind ? kind.make() : {} }) ? 'internal' : 'client',
     assignee_role: '', due_offset_days: null, config: kind ? kind.make() : {},
   })
 }
 
-/** A step's visibility follows its type, as the server enforces. */
+/** Only a task for the team is hidden from the client; every other step is theirs. */
+export const isInternal = (s: { type: string; config?: Record<string, any> }): boolean => s.type === 'task' && s.config?.audience === 'team'
+
+/** A step's visibility follows its type and, for a task, who it is for, as the server enforces. */
 export function withVisibility(s: StepDoc): StepDoc {
-  return { ...s, visibility: kindOf(s.type)?.internal ? 'internal' : 'client' }
+  return { ...s, visibility: isInternal(s) ? 'internal' : 'client' }
 }
 
 export function move<T>(list: T[], from: number, to: number): T[] {

@@ -75,7 +75,7 @@ def task_notes(ob: m.Onboarding, step: m.Step, assignee: str | None) -> str:
     if step.visibility == "client" and assignee:
         parts.append(f"For: {assignee}")
     checklist = (d.get("config") or {}).get("checklist") or []
-    if step.visibility == "internal" and checklist:
+    if checklist and (step.visibility == "internal" or step.type == "task"):
         parts.append("Checklist:\n" + "\n".join(f"- {c}" for c in checklist))
     if step.status == "skipped":
         parts.append("Skipped.")
@@ -97,6 +97,11 @@ def summary_line(step: m.Step, response: m.Response) -> str:
         return redact(f"Client connected the account ({str(d.get('account_label', ''))[:80]}).") if d.get("status") == "connected" else "Client asked for help with this."
     if step.type == "book_call":
         return "Client booked the call." if d.get("booked") else "Client hasn't booked the call yet."
+    if step.type == "task":
+        if d.get("done"):
+            return "Client marked this done."
+        n = len(d.get("checked", []))
+        return f"Client ticked {n} item{'s' if n != 1 else ''}."
     if step.type == "upload":
         n = len(d.get("file_ids", []))
         return f"Client uploaded {n} file{'s' if n != 1 else ''}." if n else "Client had nothing to upload."
