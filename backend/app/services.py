@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from . import models as m
-from . import branding, notifications, provision
+from . import branding, changes, notifications, provision
 from .errors import Conflict, Invalid, NotFound
 from .redact import redact
 from .steps import registry
@@ -537,7 +537,7 @@ def document_etag(doc: dict) -> str:
     return hashlib.sha256(json.dumps(doc, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
-def update_onboarding_steps(db: Session, org_id: str, onboarding_id: str, *, sections: list, steps: list, etag: str | None = None) -> m.Onboarding:
+def update_onboarding_steps(db: Session, org_id: str, onboarding_id: str, *, sections: list, steps: list, etag: str | None = None, notify_client: bool = True) -> m.Onboarding:
     """Replace an onboarding's sections and steps. A draft can change freely; after sending, the same rules hold (a step that
     holds answers, files or comments can be edited but not removed or retyped; skip it instead) and what depends on the steps is
     brought in line: new steps get due dates from the start, the onboarding reopens when it gains an open step or finishes when
@@ -548,6 +548,7 @@ def update_onboarding_steps(db: Session, org_id: str, onboarding_id: str, *, sec
     if etag is not None and etag != document_etag(ob.document):
         raise Conflict("These steps were changed by someone else after you opened them. Reload to see their changes, then make yours again.")
     sent = ob.status != "draft"
+    seen_before = changes.snapshot(ob.document)
     doc = _with_steps(ob.document, sections, steps)
     wanted = {d["key"]: d for d in doc["steps"]}
     existing = {s.key: s for s in ob.steps}
@@ -583,6 +584,8 @@ def update_onboarding_steps(db: Session, org_id: str, onboarding_id: str, *, sec
     db.expire(ob, ["steps"])  # reload in position order
     if sent:
         _reconcile_status(db, ob)
+        if notify_client:
+            changes.note_edit(ob, seen_before, now())
     return ob
 
 

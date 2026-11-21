@@ -265,6 +265,8 @@ export interface OnboardingDocument {
   locked: string[]
   /** Which version of the steps this screen is looking at; sent back so a stale save is refused. */
   etag: string
+  /** The client will be told about earlier edits once the batch has been quiet for a few minutes. */
+  client_notice_pending: boolean
 }
 
 export interface TemplateCheck {

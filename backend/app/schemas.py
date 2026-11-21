@@ -108,6 +108,8 @@ class OnboardingStepsIn(BaseModel):
     steps: list[Any] = Field(max_length=100)
     # What the editor was looking at (from GET /document). If the steps changed since, the save is refused.
     etag: str | None = Field(default=None, max_length=64)
+    # After sending, tell the client about the change (one batched message). Off for a typo fix.
+    notify_client: bool = True
 
 
 class StepAnswerIn(BaseModel):

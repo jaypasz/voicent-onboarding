@@ -87,6 +87,8 @@ class Settings:
     nudge_quiet_start: int = 21
     nudge_quiet_end: int = 8
     nudge_retry_hours: int = 6
+    # After an edit to a sent onboarding, how long it must sit unedited before the client is told (one message for the batch).
+    change_notice_delay_minutes: int = 10
     default_timezone: str = "America/New_York"
     brand_name: str = "Voicent"
 
@@ -202,6 +204,7 @@ class Settings:
             jobs_enabled=e("JOBS_ENABLED", "1") != "0",
             jobs_interval_minutes=int(e("JOBS_INTERVAL_MINUTES", "15")),
             nudge_max=int(e("NUDGE_MAX", "3")),
+            change_notice_delay_minutes=int(e("CHANGE_NOTICE_DELAY_MINUTES", "10")),
             nudge_quiet_start=int(e("NUDGE_QUIET_START", "21")),
             nudge_quiet_end=int(e("NUDGE_QUIET_END", "8")),
             nudge_retry_hours=int(e("NUDGE_RETRY_HOURS", "6")),
@@ -224,7 +227,7 @@ class Settings:
                 raise RuntimeError("Each service token must be at least 24 characters.")
         if self.link_ttl_days < 1:
             raise RuntimeError("LINK_TTL_DAYS must be at least 1.")
-        if self.jobs_interval_minutes < 1 or self.nudge_max < 1 or self.nudge_retry_hours < 1:
+        if self.jobs_interval_minutes < 1 or self.nudge_max < 1 or self.nudge_retry_hours < 1 or self.change_notice_delay_minutes < 0:
             raise RuntimeError("JOBS_INTERVAL_MINUTES, NUDGE_MAX and NUDGE_RETRY_HOURS must be at least 1.")
         if not (0 <= self.nudge_quiet_start <= 23 and 0 <= self.nudge_quiet_end <= 23):
             raise RuntimeError("NUDGE_QUIET_START and NUDGE_QUIET_END must be hours from 0 to 23.")

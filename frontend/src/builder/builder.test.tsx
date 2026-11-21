@@ -182,8 +182,8 @@ describe('OnboardingStepsPage', () => {
   test('a draft saves its steps with PUT', async () => {
     const { calls } = mockFetch({
       ...ob, 'GET /templates': { body: [] },
-      'GET /onboardings/o1/document': { body: { document: DOC, editable: true, sent: false, etag: 'e1', locked: ['basics'] } },
-      'PUT /onboardings/o1/document': { body: { document: { ...DOC, steps: [FORM] }, editable: true, sent: false, etag: 'e2', locked: ['basics'], steps: [] } },
+      'GET /onboardings/o1/document': { body: { document: DOC, editable: true, sent: false, etag: 'e1', client_notice_pending: false, locked: ['basics'] } },
+      'PUT /onboardings/o1/document': { body: { document: { ...DOC, steps: [FORM] }, editable: true, sent: false, etag: 'e2', client_notice_pending: false, locked: ['basics'], steps: [] } },
     })
     renderRoute(<OnboardingStepsPage />, '/onboardings/:id/steps', '/onboardings/o1/steps')
     expect(await screen.findByRole('button', { name: 'Remove “Basics”' })).toBeDisabled()
@@ -198,8 +198,8 @@ describe('OnboardingStepsPage', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     const { calls } = mockFetch({
       ...ob, 'GET /templates': { body: [] },
-      'GET /onboardings/o1/document': { body: { document: DOC, editable: true, sent: true, etag: 'e1', locked: [] } },
-      'PUT /onboardings/o1/document': { body: { document: { ...DOC, steps: [FORM] }, editable: true, sent: true, etag: 'e2', locked: [], steps: [] } },
+      'GET /onboardings/o1/document': { body: { document: DOC, editable: true, sent: true, etag: 'e1', client_notice_pending: false, locked: [] } },
+      'PUT /onboardings/o1/document': { body: { document: { ...DOC, steps: [FORM] }, editable: true, sent: true, etag: 'e2', client_notice_pending: true, locked: [], steps: [] } },
     })
     renderRoute(<OnboardingStepsPage />, '/onboardings/:id/steps', '/onboardings/o1/steps')
     expect(await screen.findByText(/has been sent, so the client sees saved changes straight away/)).toBeInTheDocument()
@@ -207,12 +207,29 @@ describe('OnboardingStepsPage', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
     expect(await screen.findByText('Saved. The client sees these changes now.')).toBeInTheDocument()
     expect(window.confirm).toHaveBeenCalled()
-    expect(calls.find((c) => c.method === 'PUT')!.body.etag).toBe('e1')
+    expect(calls.find((c) => c.method === 'PUT')!.body).toMatchObject({ etag: 'e1', notify_client: true })
+    expect(await screen.findByText(/The client will be told about your changes in a few minutes/)).toBeInTheDocument()
+  })
+
+  test('unticking "tell the client" saves a silent change', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const { calls } = mockFetch({
+      ...ob, 'GET /templates': { body: [] },
+      'GET /onboardings/o1/document': { body: { document: DOC, editable: true, sent: true, etag: 'e1', client_notice_pending: false, locked: [] } },
+      'PUT /onboardings/o1/document': { body: { document: { ...DOC, steps: [FORM] }, editable: true, sent: true, etag: 'e2', client_notice_pending: false, locked: [], steps: [] } },
+    })
+    renderRoute(<OnboardingStepsPage />, '/onboardings/:id/steps', '/onboardings/o1/steps')
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove “Approve”' }))
+    await userEvent.click(screen.getByLabelText(/Tell the client about these changes/))
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved. The client sees these changes now.')
+    expect(calls.find((c) => c.method === 'PUT')!.body.notify_client).toBe(false)
+    expect(screen.queryByText(/The client will be told/)).not.toBeInTheDocument()
   })
 
   test('declining the confirmation saves nothing', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false)
-    const { calls } = mockFetch({ ...ob, 'GET /templates': { body: [] }, 'GET /onboardings/o1/document': { body: { document: DOC, editable: true, sent: true, etag: 'e1', locked: [] } } })
+    const { calls } = mockFetch({ ...ob, 'GET /templates': { body: [] }, 'GET /onboardings/o1/document': { body: { document: DOC, editable: true, sent: true, etag: 'e1', client_notice_pending: false, locked: [] } } })
     renderRoute(<OnboardingStepsPage />, '/onboardings/:id/steps', '/onboardings/o1/steps')
     await userEvent.click(await screen.findByRole('button', { name: 'Remove “Approve”' }))
     await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
@@ -224,7 +241,7 @@ describe('OnboardingStepsPage', () => {
     let fresh = false
     mockFetch({
       ...ob, 'GET /templates': { body: [] },
-      'GET /onboardings/o1/document': () => ({ body: { document: fresh ? { ...DOC, steps: [FORM] } : DOC, editable: true, sent: true, etag: fresh ? 'e2' : 'e1', locked: [] } }),
+      'GET /onboardings/o1/document': () => ({ body: { document: fresh ? { ...DOC, steps: [FORM] } : DOC, editable: true, sent: true, etag: fresh ? 'e2' : 'e1', client_notice_pending: false, locked: [] } }),
       'PUT /onboardings/o1/document': { status: 409, body: { detail: 'These steps were changed by someone else after you opened them. Reload to see their changes, then make yours again.' } },
     })
     renderRoute(<OnboardingStepsPage />, '/onboardings/:id/steps', '/onboardings/o1/steps')
@@ -238,7 +255,7 @@ describe('OnboardingStepsPage', () => {
   })
 
   test('an archived onboarding shows its steps but cannot change them, and can still become a template', async () => {
-    mockFetch({ ...ob, 'GET /templates': { body: [] }, 'GET /onboardings/o1/document': { body: { document: DOC, editable: false, sent: true, etag: 'e1', locked: [] } } })
+    mockFetch({ ...ob, 'GET /templates': { body: [] }, 'GET /onboardings/o1/document': { body: { document: DOC, editable: false, sent: true, etag: 'e1', client_notice_pending: false, locked: [] } } })
     renderRoute(<OnboardingStepsPage />, '/onboardings/:id/steps', '/onboardings/o1/steps')
     expect(await screen.findByText(/is archived, so its steps can't change/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument()
