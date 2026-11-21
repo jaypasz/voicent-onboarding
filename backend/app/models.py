@@ -198,6 +198,10 @@ class Onboarding(Stamped, Base):
     provision_lease_until: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     provision_error: Mapped[str] = mapped_column(String(300), default="", server_default="")  # our own wording, never the receiver's
     provisioned_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Telling the client about edits made after sending (changes.py): when the latest unannounced edit was made, and what the
+    # client's steps looked like before the first of them (title and fingerprint per client-visible step).
+    steps_changed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    client_seen_steps: Mapped[list | None] = mapped_column(JSON, nullable=True)
     voicent_workspace_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     # The team member who looks after this onboarding: told when it finishes or the client goes quiet.
     owner_member_id: Mapped[str | None] = mapped_column(ForeignKey("org_members.id", ondelete="SET NULL"), nullable=True, index=True)
