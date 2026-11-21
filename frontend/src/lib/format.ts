@@ -25,6 +25,19 @@ export const STAGE: Record<Stage, { glyph: string; label: string; help: string }
   stalled: { glyph: '⏸', label: 'Stalled', help: 'Marked stalled: gone quiet.' },
 }
 
+/** A date with no time ("2026-12-01"), shown as that day wherever you are. new Date() would read it as UTC midnight and show the day before in the Americas. */
+export function formatDay(day: string | null | undefined): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day ?? '')
+  if (!m) return ''
+  return new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+/** Today's date where you are, as YYYY-MM-DD (toISOString would give the UTC date). */
+export function todayLocal(now = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`
+}
+
 export function formatDate(iso: string | null | undefined): string {
   if (!iso) return ''
   const d = new Date(iso)

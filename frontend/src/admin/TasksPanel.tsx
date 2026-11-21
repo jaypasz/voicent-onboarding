@@ -5,11 +5,10 @@ import { ApiError } from '../api/http'
 import type { Task, TeamMember } from '../api/types'
 import { Banner } from '../components/Banner'
 import { LoadError } from '../components/LoadError'
-import { formatDate } from '../lib/format'
+import { formatDay, todayLocal } from '../lib/format'
 import { memberLabel } from '../lib/team'
 
-const today = () => new Date().toISOString().slice(0, 10)
-const overdue = (t: Task) => !t.done_at && !!t.due_on && t.due_on < today()
+const overdue = (t: Task) => !t.done_at && !!t.due_on && t.due_on < todayLocal()
 const msg = (e: unknown) => (e instanceof ApiError ? e.message : 'That did not work.')
 
 function TaskRow({ t, members, clientName }: { t: Task; members: TeamMember[]; clientName?: string }) {
@@ -24,12 +23,14 @@ function TaskRow({ t, members, clientName }: { t: Task; members: TeamMember[]; c
           <input type="checkbox" checked={!!t.done_at} disabled={update.isPending} onChange={(e) => void run(() => update.mutateAsync({ id: t.id, patch: { done: e.target.checked } }))} />
           <span><strong>{t.title}</strong>{clientName && <> · <Link to={`/clients/${t.client_id}`}>{clientName}</Link></>}</span>
         </label>
-        {t.due_on && <span className={`due${overdue(t) ? ' due-overdue' : ''}`}>{overdue(t) ? 'Overdue: ' : 'Due '}{formatDate(t.due_on)}</span>}
-        <select aria-label={`Who does "${t.title}"`} value={t.assignee_id ?? ''} onChange={(e) => void run(() => update.mutateAsync({ id: t.id, patch: { assignee_id: e.target.value || null } }))}>
-          <option value="">Nobody</option>
-          {members.map((m) => <option key={m.id} value={m.id}>{memberLabel(m)}{m.is_you ? ' (you)' : ''}</option>)}
-        </select>
-        <button className="btn btn-small" disabled={del.isPending} onClick={() => void run(() => del.mutateAsync(t.id))} aria-label={`Delete "${t.title}"`}>Delete</button>
+        <div className="row wrap task-meta">
+          {t.due_on && <span className={`due${overdue(t) ? ' due-overdue' : ''}`}>{overdue(t) ? 'Overdue: ' : 'Due '}{formatDay(t.due_on)}</span>}
+          <select aria-label={`Who does "${t.title}"`} value={t.assignee_id ?? ''} onChange={(e) => void run(() => update.mutateAsync({ id: t.id, patch: { assignee_id: e.target.value || null } }))}>
+            <option value="">Nobody</option>
+            {members.map((m) => <option key={m.id} value={m.id}>{memberLabel(m)}{m.is_you ? ' (you)' : ''}</option>)}
+          </select>
+          <button className="btn btn-small" disabled={del.isPending} onClick={() => void run(() => del.mutateAsync(t.id))} aria-label={`Delete "${t.title}"`}>Delete</button>
+        </div>
       </div>
       {error && <Banner kind="error">{error}</Banner>}
     </li>
