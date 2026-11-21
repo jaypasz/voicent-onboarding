@@ -92,7 +92,7 @@ input[type='checkbox'], input[type='radio'] { width: 22px; height: 22px; vertica
 .tracker-step:first-child::before { display: none; }
 .tracker-node { position: relative; z-index: 1; width: 32px; height: 32px; border-radius: 50%; border: 2px solid var(--line); background: var(--surface); display: inline-flex; align-items: center; justify-content: center; font-weight: 700; color: var(--text); }
 .tracker-done .tracker-node { border-color: var(--ok); color: var(--ok); }
-.tracker-done::before, .tracker-skipped::before { background: var(--ok); }
+.tracker-done + .tracker-step::before, .tracker-skipped + .tracker-step::before { background: var(--ok); }
 .tracker-in_progress .tracker-node { border-color: var(--warn); color: var(--warn); }
 .tracker-next .tracker-node { outline: 3px solid var(--accent); outline-offset: 1px; }
 .tracker-next { color: var(--text); font-weight: 600; }
