@@ -42,7 +42,7 @@ def get(onboarding_id: str, db: Session = Db, org: str = Org):
 
 
 def _document(ob: m.Onboarding) -> dict:
-    return {"document": ob.document, "editable": ob.status == "draft", "locked": services.locked_step_keys(ob)}
+    return {"document": ob.document, "editable": ob.status != "archived", "sent": ob.status != "draft", "locked": services.locked_step_keys(ob), "etag": services.document_etag(ob.document)}
 
 
 @router.get("/{onboarding_id}/document")
@@ -53,8 +53,8 @@ def get_document(onboarding_id: str, db: Session = Db, org: str = Org):
 
 @router.put("/{onboarding_id}/document")
 def put_document(onboarding_id: str, body: OnboardingStepsIn, db: Session = Db, org: str = Org):
-    """Replace a draft's sections and steps. Steps that already hold answers, files or comments can't be removed or change type."""
-    ob = services.update_onboarding_steps(db, org, onboarding_id, sections=body.sections, steps=body.steps)
+    """Replace an onboarding's sections and steps, before or after sending. Steps that already hold answers, files or comments can't be removed or change type."""
+    ob = services.update_onboarding_steps(db, org, onboarding_id, sections=body.sections, steps=body.steps, etag=body.etag)
     return onboarding_detail(ob) | _document(ob)
 
 

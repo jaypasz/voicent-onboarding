@@ -340,3 +340,26 @@ def test_the_background_sync_sees_the_change_that_triggered_it(tmp_path):
         client.post(f"/api/onboardings/{ob['id']}/steps/basics/complete")
         done = [t for t in world.aios.tasks.values() if t["title"] == "Company basics"][0]
         assert done["status"] == "done"
+
+
+# ---------------------------------------------------------------- editing after sending
+
+def test_a_renamed_step_updates_its_task_and_a_removed_step_closes_its_task_and_a_new_one_gets_a_task(w):
+    _, oid, _ = w.live()
+    doc = w.api.get(f"/api/onboardings/{oid}/document").json()
+    steps = [dict(s) for s in doc["document"]["steps"]]
+    steps = [s for s in steps if s["key"] != "it_access"]  # removed (no answers on it yet)
+    for s in steps:
+        if s["key"] == "basics":
+            s["title"] = "Business details"
+    steps.append({"key": "logo", "type": "upload", "title": "Your logo", "config": {"accept": ["png"]}})
+    assert w.api.put(f"/api/onboardings/{oid}/document", json={"steps": steps}).status_code == 200
+    sync(w, oid)
+    titles = sorted(t["title"] for t in w.aios.tasks.values())
+    assert "Waiting on client: Business details" in titles and "Waiting on client: Your logo" in titles
+    assert not any(t == "Waiting on client: Company basics" for t in titles)
+    removed = [t for t in w.aios.tasks.values() if t["title"].startswith("(Removed from the onboarding)")]
+    assert len(removed) == 1 and removed[0]["status"] == "done"
+    n = len(w.aios.tasks)
+    w.aios.requests.clear()
+    assert sync(w, oid).changes == 0 and len(w.aios.tasks) == n and not w.aios.calls("PATCH", r".*")  # settled: nothing repeats

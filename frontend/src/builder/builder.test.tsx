@@ -182,8 +182,8 @@ describe('OnboardingStepsPage', () => {
   test('a draft saves its steps with PUT', async () => {
     const { calls } = mockFetch({
       ...ob, 'GET /templates': { body: [] },
-      'GET /onboardings/o1/document': { body: { document: DOC, editable: true, locked: ['basics'] } },
-      'PUT /onboardings/o1/document': { body: { document: { ...DOC, steps: [FORM] }, editable: true, locked: ['basics'], steps: [] } },
+      'GET /onboardings/o1/document': { body: { document: DOC, editable: true, sent: false, etag: 'e1', locked: ['basics'] } },
+      'PUT /onboardings/o1/document': { body: { document: { ...DOC, steps: [FORM] }, editable: true, sent: false, etag: 'e2', locked: ['basics'], steps: [] } },
     })
     renderRoute(<OnboardingStepsPage />, '/onboardings/:id/steps', '/onboardings/o1/steps')
     expect(await screen.findByRole('button', { name: 'Remove “Basics”' })).toBeDisabled()
@@ -191,14 +191,57 @@ describe('OnboardingStepsPage', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Remove “Approve”' }))
     await userEvent.click(screen.getByRole('button', { name: 'Save steps' }))
     expect(await screen.findByText(/Saved. The client sees these steps/)).toBeInTheDocument()
-    expect(calls.find((c) => c.method === 'PUT')!.body).toEqual({ sections: [], steps: [FORM] })
+    expect(calls.find((c) => c.method === 'PUT')!.body).toEqual({ sections: [], steps: [FORM], etag: 'e1' })
   })
 
-  test('after sending, steps are shown but not editable, and can still become a template', async () => {
-    mockFetch({ ...ob, 'GET /templates': { body: [] }, 'GET /onboardings/o1/document': { body: { document: DOC, editable: false, locked: [] } } })
+  test('after sending, steps stay editable: a warning, a confirmation, and the etag goes back', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const { calls } = mockFetch({
+      ...ob, 'GET /templates': { body: [] },
+      'GET /onboardings/o1/document': { body: { document: DOC, editable: true, sent: true, etag: 'e1', locked: [] } },
+      'PUT /onboardings/o1/document': { body: { document: { ...DOC, steps: [FORM] }, editable: true, sent: true, etag: 'e2', locked: [], steps: [] } },
+    })
     renderRoute(<OnboardingStepsPage />, '/onboardings/:id/steps', '/onboardings/o1/steps')
-    expect(await screen.findByText(/has been sent, so its steps can't change/)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Save steps' })).not.toBeInTheDocument()
+    expect(await screen.findByText(/has been sent, so the client sees saved changes straight away/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Remove “Approve”' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(await screen.findByText('Saved. The client sees these changes now.')).toBeInTheDocument()
+    expect(window.confirm).toHaveBeenCalled()
+    expect(calls.find((c) => c.method === 'PUT')!.body.etag).toBe('e1')
+  })
+
+  test('declining the confirmation saves nothing', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const { calls } = mockFetch({ ...ob, 'GET /templates': { body: [] }, 'GET /onboardings/o1/document': { body: { document: DOC, editable: true, sent: true, etag: 'e1', locked: [] } } })
+    renderRoute(<OnboardingStepsPage />, '/onboardings/:id/steps', '/onboardings/o1/steps')
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove “Approve”' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(calls.some((c) => c.method === 'PUT')).toBe(false)
+  })
+
+  test('a stale save offers to reload the latest steps', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    let fresh = false
+    mockFetch({
+      ...ob, 'GET /templates': { body: [] },
+      'GET /onboardings/o1/document': () => ({ body: { document: fresh ? { ...DOC, steps: [FORM] } : DOC, editable: true, sent: true, etag: fresh ? 'e2' : 'e1', locked: [] } }),
+      'PUT /onboardings/o1/document': { status: 409, body: { detail: 'These steps were changed by someone else after you opened them. Reload to see their changes, then make yours again.' } },
+    })
+    renderRoute(<OnboardingStepsPage />, '/onboardings/:id/steps', '/onboardings/o1/steps')
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove “Approve”' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(await screen.findByText(/changed by someone else/)).toBeInTheDocument()
+    fresh = true
+    await userEvent.click(screen.getByRole('button', { name: 'Reload the latest steps' }))
+    await waitFor(() => expect(screen.queryByText(/changed by someone else/)).not.toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: 'Remove “Approve”' })).not.toBeInTheDocument()
+  })
+
+  test('an archived onboarding shows its steps but cannot change them, and can still become a template', async () => {
+    mockFetch({ ...ob, 'GET /templates': { body: [] }, 'GET /onboardings/o1/document': { body: { document: DOC, editable: false, sent: true, etag: 'e1', locked: [] } } })
+    renderRoute(<OnboardingStepsPage />, '/onboardings/:id/steps', '/onboardings/o1/steps')
+    expect(await screen.findByText(/is archived, so its steps can't change/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save as template' })).toBeInTheDocument()
   })
 })
