@@ -1,12 +1,14 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router'
-import { useAddContact, useClients, useOnboardings, useSetPaying, useUpdateClient, useUpdateContact } from '../api/admin'
-import { formatDateTime } from '../lib/format'
+import { useAddContact, useClients, useOnboardings, useSetOutcome, useSetPaying, useUpdateClient, useUpdateContact } from '../api/admin'
+import { STAGE, formatDateTime } from '../lib/format'
 import { ApiError } from '../api/http'
-import type { Contact } from '../api/types'
+import type { Client, Contact } from '../api/types'
 import { Banner } from '../components/Banner'
 import { LoadError } from '../components/LoadError'
+import { StageBadge } from '../components/StageBadge'
 import { OnboardingBadge } from '../components/StatusBadge'
+import { TasksPanel } from './TasksPanel'
 
 function ContactRow({ clientId, c }: { clientId: string; c: Contact }) {
   const update = useUpdateContact(clientId)
@@ -61,6 +63,33 @@ function PayingCard({ clientId, since }: { clientId: string; since: string | nul
   )
 }
 
+/** Where they are in the pipeline. Lead, onboarding and won follow from what exists; lost and stalled are your call. */
+function StageCard({ client }: { client: Client }) {
+  const set = useSetOutcome(client.id)
+  const [error, setError] = useState<string | null>(null)
+  async function go(outcome: 'lost' | 'stalled' | null) {
+    setError(null)
+    try { await set.mutateAsync(outcome) } catch (e) { setError(e instanceof ApiError ? e.message : 'That did not work.') }
+  }
+  return (
+    <section className="card row between wrap" aria-label="Stage">
+      <div>
+        <StageBadge stage={client.stage} />
+        <p className="help">{STAGE[client.stage].help}</p>
+      </div>
+      <div className="row wrap">
+        {client.outcome
+          ? <button className="btn btn-small" disabled={set.isPending} onClick={() => void go(null)}>Reopen</button>
+          : !client.paying_since && <>
+              <button className="btn btn-small" disabled={set.isPending} onClick={() => void go('stalled')}>Mark stalled</button>
+              <button className="btn btn-small" disabled={set.isPending} onClick={() => void go('lost')}>Mark lost</button>
+            </>}
+      </div>
+      {error && <Banner kind="error">{error}</Banner>}
+    </section>
+  )
+}
+
 export default function ClientDetail() {
   const { id = '' } = useParams()
   const clients = useClients()
@@ -99,6 +128,7 @@ export default function ClientDetail() {
         </button>
       </div>
       <p className="help">{client.kind}{client.status === 'archived' ? ' · archived' : ''}</p>
+      <StageCard client={client} />
       <PayingCard clientId={client.id} since={client.paying_since} />
       <label className="field-group narrow-form">
         <span>Their time zone</span>
@@ -119,6 +149,9 @@ export default function ClientDetail() {
         <button className="btn btn-primary" disabled={add.isPending || !f.name.trim()}>Add contact</button>
       </form>
       {error && <Banner kind="error">{error}</Banner>}
+
+      <h2>Tasks</h2>
+      <TasksPanel filter={{ clientId: id }} clientId={id} />
 
       <div className="row between wrap">
         <h2>Onboardings</h2>

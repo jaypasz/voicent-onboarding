@@ -1,4 +1,4 @@
-import type { OnboardingStatus, StepStatus } from '../api/types'
+import type { OnboardingStatus, Stage, StepStatus } from '../api/types'
 
 // Colour never carries meaning alone: every status has a glyph and a word.
 export const STEP_STATUS: Record<StepStatus, { glyph: string; label: string }> = {
@@ -14,6 +14,15 @@ export const ONBOARDING_STATUS: Record<OnboardingStatus, { glyph: string; label:
   paused: { glyph: '⏸', label: 'Paused' },
   completed: { glyph: '✓', label: 'Completed' },
   archived: { glyph: '▣', label: 'Archived' },
+}
+
+export const STAGES: Stage[] = ['lead', 'onboarding', 'won', 'lost', 'stalled']
+export const STAGE: Record<Stage, { glyph: string; label: string; help: string }> = {
+  lead: { glyph: '○', label: 'Lead', help: 'No onboarding under way yet.' },
+  onboarding: { glyph: '◐', label: 'Onboarding', help: 'An onboarding is active or paused.' },
+  won: { glyph: '✓', label: 'Won', help: 'Marked as a paying customer.' },
+  lost: { glyph: '✕', label: 'Lost', help: 'Marked lost.' },
+  stalled: { glyph: '⏸', label: 'Stalled', help: 'Marked stalled: gone quiet.' },
 }
 
 export function formatDate(iso: string | null | undefined): string {

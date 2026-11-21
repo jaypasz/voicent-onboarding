@@ -114,7 +114,7 @@ describe('Settings', () => {
 })
 
 describe('paying customers', () => {
-  const client: Client = { id: 'cl1', name: 'Acme', kind: 'msp', status: 'active', notes: '', timezone: 'America/New_York', created_at: '2026-11-01T00:00:00Z', paying_since: null, contacts: [] }
+  const client: Client = { id: 'cl1', name: 'Acme', kind: 'msp', status: 'active', notes: '', timezone: 'America/New_York', created_at: '2026-11-01T00:00:00Z', paying_since: null, outcome: null, stage: 'lead', contacts: [] }
 
   test('the client page marks a client as paying, after asking', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)

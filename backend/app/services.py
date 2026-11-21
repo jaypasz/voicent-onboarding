@@ -9,7 +9,7 @@ import datetime as dt
 import re
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from . import models as m
 from . import branding, notifications, provision
@@ -207,11 +207,85 @@ def get_client(db: Session, org_id: str, client_id: str) -> m.Client:
     return _client(db, org_id, client_id)
 
 
-def list_clients(db: Session, org_id: str, status: str | None = None) -> list[m.Client]:
-    q = select(m.Client).where(m.Client.org_id == org_id).order_by(m.Client.name)
+STAGES = ("lead", "onboarding", "won", "lost", "stalled")
+
+
+def list_clients(db: Session, org_id: str, status: str | None = None, stage: str | None = None) -> list[m.Client]:
+    if stage is not None and stage not in STAGES:
+        raise Invalid(f"Stage must be one of {', '.join(STAGES)}.")
+    q = select(m.Client).where(m.Client.org_id == org_id).options(selectinload(m.Client.onboardings)).order_by(m.Client.name)
     if status:
         q = q.where(m.Client.status == status)
-    return list(db.scalars(q))
+    rows = list(db.scalars(q))
+    return [c for c in rows if c.stage == stage] if stage else rows
+
+
+def set_client_outcome(db: Session, org_id: str, client_id: str, outcome: str | None) -> m.Client:
+    """Jay's call that a prospect is lost or stalled, or null to take it back. A paying client can't be marked: they're won."""
+    c = _client(db, org_id, client_id)
+    if outcome is not None and c.paying_since:
+        raise Conflict("This client is paying. Unmark them as paying first.")
+    c.outcome = outcome
+    db.flush()
+    return c
+
+
+def _task(db: Session, org_id: str, task_id: str) -> m.Task:
+    t = db.scalar(select(m.Task).where(m.Task.id == task_id, m.Task.org_id == org_id))
+    if not t:
+        raise NotFound("Task not found.")
+    return t
+
+
+def list_tasks(db: Session, org_id: str, *, client_id: str | None = None, onboarding_id: str | None = None,
+               assignee_id: str | None = None, done: bool | None = None) -> list[m.Task]:
+    q = select(m.Task).where(m.Task.org_id == org_id)
+    if client_id:
+        q = q.where(m.Task.client_id == client_id)
+    if onboarding_id:
+        q = q.where(m.Task.onboarding_id == onboarding_id)
+    if assignee_id:
+        q = q.where(m.Task.assignee_id == assignee_id)
+    if done is not None:
+        q = q.where(m.Task.done_at.is_not(None) if done else m.Task.done_at.is_(None))
+    # Open work first, soonest due first (undated last), then newest.
+    return list(db.scalars(q.order_by(m.Task.done_at.is_not(None), m.Task.due_on.is_(None), m.Task.due_on, m.Task.created_at.desc())))
+
+
+def create_task(db: Session, org_id: str, *, client_id: str, title: str, onboarding_id: str | None = None,
+                assignee_id: str | None = None, due_on: dt.date | None = None) -> m.Task:
+    _client(db, org_id, client_id)
+    if onboarding_id and not db.scalar(select(m.Onboarding.id).where(
+            m.Onboarding.id == onboarding_id, m.Onboarding.org_id == org_id, m.Onboarding.client_id == client_id)):
+        raise NotFound("Onboarding not found.")
+    if assignee_id:
+        _member(db, org_id, assignee_id)
+    t = m.Task(org_id=org_id, client_id=client_id, onboarding_id=onboarding_id, title=redact(title.strip()), assignee_id=assignee_id, due_on=due_on)
+    db.add(t)
+    db.flush()
+    return t
+
+
+def update_task(db: Session, org_id: str, task_id: str, fields: dict, at: dt.datetime) -> m.Task:
+    """`fields` holds only what was sent, so null clears an assignee or a date while leaving out leaves it alone."""
+    t = _task(db, org_id, task_id)
+    if "title" in fields and fields["title"] is not None:
+        t.title = redact(fields["title"].strip())
+    if "assignee_id" in fields:
+        if fields["assignee_id"]:
+            _member(db, org_id, fields["assignee_id"])
+        t.assignee_id = fields["assignee_id"]
+    if "due_on" in fields:
+        t.due_on = fields["due_on"]
+    if fields.get("done") is not None:
+        t.done_at = (t.done_at or at) if fields["done"] else None
+    db.flush()
+    return t
+
+
+def delete_task(db: Session, org_id: str, task_id: str) -> None:
+    db.delete(_task(db, org_id, task_id))
+    db.flush()
 
 
 def create_client(db: Session, org_id: str, *, name: str, kind: str = "other", notes: str = "", timezone: str = "America/New_York") -> m.Client:

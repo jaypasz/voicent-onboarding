@@ -74,6 +74,8 @@ class ClientOut(BaseModel):
     timezone: str
     created_at: dt.datetime
     paying_since: dt.datetime | None = None
+    outcome: str | None = None
+    stage: str
     contacts: list[ContactOut] = []
 
 
@@ -159,3 +161,30 @@ def onboarding_summary(ob: m.Onboarding) -> dict:
 
 def onboarding_detail(ob: m.Onboarding) -> dict:
     return onboarding_summary(ob) | {"steps": [step_out(ob, s) for s in ob.steps]}
+
+
+class TaskIn(BaseModel):
+    client_id: str
+    onboarding_id: str | None = None
+    title: str = Field(min_length=1, max_length=200)
+    assignee_id: str | None = None
+    due_on: dt.date | None = None
+
+
+class TaskPatch(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    assignee_id: str | None = None
+    due_on: dt.date | None = None
+    done: bool | None = None
+
+
+class TaskOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    client_id: str
+    onboarding_id: str | None
+    title: str
+    assignee_id: str | None
+    due_on: dt.date | None
+    done_at: dt.datetime | None
+    created_at: dt.datetime

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { request } from './http'
 import type {
   AppNotification, Client, Contact, Features, Me, Team, OnboardingDocument, OrgSettings, PreviewView, TemplateCheck, LinkInfo, NudgeResult, NudgeRow, OnboardingDetail, OnboardingStatus, OnboardingSummary, ProvisionStatus, SentOnboarding, SyncState, TemplateDetail,
-  TemplateSummary, YamlImportResult,
+  TemplateSummary, YamlImportResult, Task,
 } from './types'
 import type { SectionDoc, StepDoc, TemplateDoc } from '../builder/doc'
 
@@ -121,6 +121,25 @@ export type OrgSettingsPatch = Partial<Pick<OrgSettings, 'brand_name' | 'email_f
 export const useSaveOrgSettings = () => useWrite((b: OrgSettingsPatch) => request<OrgSettings>('/org', { method: 'PUT', body: b }), () => [['org']])
 export const useSetPaying = (clientId: string) =>
   useWrite((paying: boolean) => request<Client>(`/clients/${clientId}/paying`, { body: { paying } }), () => [k.clients, ['provision'], k.onboardings])
+
+export const useSetOutcome = (clientId: string) =>
+  useWrite((outcome: 'lost' | 'stalled' | null) => request<Client>(`/clients/${clientId}/outcome`, { body: { outcome } }), () => [k.clients])
+
+export type TaskFilter = { clientId?: string; onboardingId?: string; assigneeId?: string; done?: boolean }
+export const useTasks = (f: TaskFilter = {}) => {
+  const q = new URLSearchParams()
+  if (f.clientId) q.set('client_id', f.clientId)
+  if (f.onboardingId) q.set('onboarding_id', f.onboardingId)
+  if (f.assigneeId) q.set('assignee_id', f.assigneeId)
+  if (f.done !== undefined) q.set('done', String(f.done))
+  const qs = q.toString()
+  return useQuery({ queryKey: ['tasks', qs], queryFn: () => request<Task[]>(`/tasks${qs ? `?${qs}` : ''}`) })
+}
+export const useCreateTask = () =>
+  useWrite((b: { client_id: string; onboarding_id?: string | null; title: string; assignee_id?: string | null; due_on?: string | null }) => request<Task>('/tasks', { body: b }), () => [['tasks']])
+export const useUpdateTask = () =>
+  useWrite((a: { id: string; patch: { title?: string; assignee_id?: string | null; due_on?: string | null; done?: boolean } }) => request<Task>(`/tasks/${a.id}`, { method: 'PATCH', body: a.patch }), () => [['tasks']])
+export const useDeleteTask = () => useWrite((id: string) => request(`/tasks/${id}`, { method: 'DELETE' }), () => [['tasks']])
 
 export const useTeam = () => useQuery({ queryKey: ['team'], queryFn: () => request<Team>('/team'), staleTime: 60_000 })
 export const useInvite = () => useWrite((b: { email: string; role: string }) => request('/team/invites', { body: b }), () => [['team']])
