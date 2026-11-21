@@ -61,8 +61,8 @@ export default function OnboardingStepsPage() {
         <>
           <p className="help">These changes are for this client only. The template “{d.document.name}” stays as it is.</p>
           {d.sent && <Banner kind="warn">This onboarding has been sent, so the client sees saved changes straight away. A step that already has answers, files or comments can be edited but not removed: skip it instead.</Banner>}
-          <StepsBuilder value={value} onChange={(v) => { setValue(v); setDirty(true); setOk(false) }} locked={d.locked} />
           {problems.length > 0 && <Problems problems={problems} />}
+          <StepsBuilder value={value} onChange={(v) => { setValue(v); setDirty(true); setOk(false) }} locked={d.locked} />
           {stale && <button type="button" className="btn btn-small" onClick={() => void reload()}>Reload the latest steps</button>}
           {ok && <Banner kind="ok">{d.sent ? 'Saved. The client sees these changes now.' : 'Saved. The client sees these steps when you send the onboarding.'}</Banner>}
           <div className="row wrap save-bar">
