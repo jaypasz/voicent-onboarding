@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { request } from './http'
 import type {
   AppNotification, Client, Contact, Features, Me, Team, OnboardingDocument, OrgSettings, PreviewView, TemplateCheck, LinkInfo, NudgeResult, NudgeRow, OnboardingDetail, OnboardingStatus, OnboardingSummary, ProvisionStatus, SentOnboarding, SyncState, TemplateDetail,
-  TemplateSummary, YamlImportResult, Task,
+  TemplateSummary, YamlImportResult, Task, TeamStepTask,
 } from './types'
 import type { SectionDoc, StepDoc, TemplateDoc } from '../builder/doc'
 
@@ -125,20 +125,27 @@ export const useSetPaying = (clientId: string) =>
 export const useSetOutcome = (clientId: string) =>
   useWrite((outcome: 'lost' | 'stalled' | null) => request<Client>(`/clients/${clientId}/outcome`, { body: { outcome } }), () => [k.clients])
 
-export type TaskFilter = { clientId?: string; onboardingId?: string; assigneeId?: string; done?: boolean }
+export type TaskFilter = { clientId?: string; assigneeId?: string; done?: boolean }
 export const useTasks = (f: TaskFilter = {}) => {
   const q = new URLSearchParams()
   if (f.clientId) q.set('client_id', f.clientId)
-  if (f.onboardingId) q.set('onboarding_id', f.onboardingId)
   if (f.assigneeId) q.set('assignee_id', f.assigneeId)
   if (f.done !== undefined) q.set('done', String(f.done))
   const qs = q.toString()
   return useQuery({ queryKey: ['tasks', qs], queryFn: () => request<Task[]>(`/tasks${qs ? `?${qs}` : ''}`) })
 }
 export const useCreateTask = () =>
-  useWrite((b: { client_id: string; onboarding_id?: string | null; title: string; assignee_id?: string | null; due_on?: string | null }) => request<Task>('/tasks', { body: b }), () => [['tasks']])
+  useWrite((b: { client_id: string; title: string; assignee_id?: string | null; due_on?: string | null }) => request<Task>('/tasks', { body: b }), () => [['tasks']])
 export const useUpdateTask = () =>
   useWrite((a: { id: string; patch: { title?: string; assignee_id?: string | null; due_on?: string | null; done?: boolean } }) => request<Task>(`/tasks/${a.id}`, { method: 'PATCH', body: a.patch }), () => [['tasks']])
+/** Team tasks that sit in an onboarding's flow, to list beside the standalone ones. */
+export const useTeamStepTasks = (f: { assigneeId?: string; done?: boolean } = {}) => {
+  const q = new URLSearchParams()
+  if (f.assigneeId) q.set('assignee_id', f.assigneeId)
+  if (f.done !== undefined) q.set('done', String(f.done))
+  const qs = q.toString()
+  return useQuery({ queryKey: ['tasks', 'in-onboardings', qs], queryFn: () => request<TeamStepTask[]>(`/tasks/in-onboardings${qs ? `?${qs}` : ''}`) })
+}
 export const useDeleteTask = () => useWrite((id: string) => request(`/tasks/${id}`, { method: 'DELETE' }), () => [['tasks']])
 
 export const useTeam = () => useQuery({ queryKey: ['team'], queryFn: () => request<Team>('/team'), staleTime: 60_000 })

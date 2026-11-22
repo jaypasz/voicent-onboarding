@@ -58,8 +58,9 @@ steps:
       url: https://example.com/book
       duration_minutes: 20
   - key: build_agent
-    type: internal_task
+    type: task
     title: Build and test the voice agent
     due_offset_days: 7
     config:
+      audience: team
       checklist: [Create the agent, Load services and hours, Test with 3 sample calls, Send greeting for approval]

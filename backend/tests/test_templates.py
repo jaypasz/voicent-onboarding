@@ -24,7 +24,7 @@ def test_the_four_presets_are_valid_and_cover_both_layouts():
     # only the MSP onboarding sets up a Voicent workspace when it is finished
     assert {s for s, d in docs.items() if d["on_complete"] == "provision_voicent_workspace"} == {"msp"}
     for d in docs.values():  # every preset uses only step types that exist
-        assert all(s["type"] in {"form", "upload", "connect", "book_call", "approval", "internal_task"} for s in d["steps"])
+        assert all(s["type"] in {"form", "upload", "connect", "book_call", "approval", "task"} for s in d["steps"])
 
 
 def test_yaml_round_trips_without_loss():
@@ -60,11 +60,14 @@ def test_svg_and_unknown_upload_types_are_refused():
 
 def test_visibility_rules():
     internal_form = doc(steps=[{"key": "x", "type": "form", "title": "X", "visibility": "internal", "config": {"fields": [{"key": "a", "label": "A", "type": "text"}]}}])
-    assert any("only internal_task" in p for p in loader.validate_document(internal_form))
-    client_task = doc(steps=[{"key": "x", "type": "internal_task", "title": "X", "visibility": "client"}])
-    assert any("never shown to clients" in p for p in loader.validate_document(client_task))
-    ok = loader.check(doc(steps=[{"key": "x", "type": "internal_task", "title": "X"}]))
-    assert ok["steps"][0]["visibility"] == "internal"
+    assert any("for the client" in p for p in loader.validate_document(internal_form))
+    # a task's audience decides who sees it, and a visibility that says otherwise is refused
+    team_task = {"key": "x", "type": "task", "title": "X", "config": {"audience": "team"}}
+    assert any("internal" in p for p in loader.validate_document(doc(steps=[dict(team_task, visibility="client")])))
+    assert loader.check(doc(steps=[team_task]))["steps"][0]["visibility"] == "internal"
+    client_task = {"key": "x", "type": "task", "title": "X", "config": {"audience": "client"}}
+    assert loader.check(doc(steps=[client_task]))["steps"][0]["visibility"] == "client"
+    assert loader.validate_document(doc(steps=[{"key": "x", "type": "task", "title": "X"}]))  # the audience is required
 
 
 def test_unknown_fields_are_refused_so_the_builder_cant_invent_them():

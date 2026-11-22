@@ -101,11 +101,29 @@ def test_approval_config_needs_the_matching_field():
     assert not a.validate_config({"deliverable": {"kind": "link", "url": "https://x.test"}})
 
 
-def test_internal_task_is_not_client_visible():
-    i = t("internal_task")
-    assert i.client_visible is False and t("form").client_visible is True
-    assert i.validate_response({}, {"note": "done"}) == ({"note": "done"}, [])
-    assert i.validate_response({}, {"other": 1})[1]
+def test_task_audience_decides_visibility():
+    k = t("task")
+    assert k.visibility_for({"audience": "team"}) == "internal" and k.visibility_for({"audience": "client"}) == "client"
+    assert t("form").visibility_for({}) == "client"
+    assert k.validate_config({"audience": "team"}) == []
+    assert k.validate_config({}) and k.validate_config({"audience": "everyone"})
+
+
+def test_task_responses():
+    k = t("task")
+    team = {"audience": "team", "checklist": ["a", "b"]}
+    assert k.validate_response(team, {"note": "done"}) == ({"done": True, "note": "done", "checked": []}, [])  # a bare note finishes it
+    client = {"audience": "client", "checklist": ["a", "b"]}
+    part, _ = k.validate_response(client, {"checked": [0]})
+    assert part == {"done": False, "note": "", "checked": [0]} and k.resulting_status(client, part) == "in_progress"
+    full, _ = k.validate_response(client, {"checked": [1, 0, 1]})
+    assert full["checked"] == [0, 1] and k.resulting_status(client, full) == "done"  # the last tick finishes it
+    assert k.validate_response(client, {"checked": [0], "done": True})[1]  # can't mark done with items open
+    assert k.validate_response(client, {"checked": [5]})[1] and k.validate_response(client, {"checked": [True]})[1]
+    assert k.validate_response(client, {"other": 1})[1] and k.validate_response(client, {"done": "yes"})[1]
+    plain = {"audience": "client"}
+    assert k.validate_response(plain, {"done": True})[0]["done"] is True and k.validate_response(plain, {"done": False})[0]["done"] is False
+    assert "checked" not in k.validate_response(plain, {"done": True})[0]
 
 
 def test_unimplemented_types_are_known_but_unusable():
@@ -116,7 +134,7 @@ def test_unimplemented_types_are_known_but_unusable():
 
 
 def test_the_registry_lists_six_working_types():
-    assert {s.type for s in registry.all_types() if s.implemented} == {"form", "upload", "connect", "book_call", "approval", "internal_task"}
+    assert {s.type for s in registry.all_types() if s.implemented} == {"form", "upload", "connect", "book_call", "approval", "task"}
     assert registry.get("nope") is None
 
 

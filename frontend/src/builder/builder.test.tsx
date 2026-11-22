@@ -82,9 +82,9 @@ describe('StepsBuilder', () => {
     expect(screen.getByText('Question 2')).toBeInTheDocument()
   })
 
-  test('the internal checklist keeps a new line and spaces while typing, and the document gets the items', async () => {
+  test('the task checklist keeps a new line and spaces while typing, and the document gets the items', async () => {
     const spy = vi.fn()
-    const TASK: StepDoc = { key: 'build', type: 'internal_task', title: 'Build', section: '', visibility: 'internal', config: { checklist: ['Create it'] } }
+    const TASK: StepDoc = { key: 'build', type: 'task', title: 'Build', section: '', visibility: 'internal', config: { audience: 'team', checklist: ['Create it'] } }
     render(<Harness steps={[TASK]} spy={spy} />)
     await userEvent.click(screen.getByRole('button', { name: /Build/, expanded: false }))
     const box = screen.getByLabelText('Checklist, one item per line')
