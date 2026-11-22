@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from . import models as m
-from . import branding, notifications, provision
+from . import branding, changes, notifications, provision
 from .errors import Conflict, Invalid, NotFound
 from .redact import redact
 from .steps import registry
@@ -239,13 +239,11 @@ def _task(db: Session, org_id: str, task_id: str) -> m.Task:
     return t
 
 
-def list_tasks(db: Session, org_id: str, *, client_id: str | None = None, onboarding_id: str | None = None,
+def list_tasks(db: Session, org_id: str, *, client_id: str | None = None,
                assignee_id: str | None = None, done: bool | None = None) -> list[m.Task]:
     q = select(m.Task).where(m.Task.org_id == org_id)
     if client_id:
         q = q.where(m.Task.client_id == client_id)
-    if onboarding_id:
-        q = q.where(m.Task.onboarding_id == onboarding_id)
     if assignee_id:
         q = q.where(m.Task.assignee_id == assignee_id)
     if done is not None:
@@ -254,15 +252,29 @@ def list_tasks(db: Session, org_id: str, *, client_id: str | None = None, onboar
     return list(db.scalars(q.order_by(m.Task.done_at.is_not(None), m.Task.due_on.is_(None), m.Task.due_on, m.Task.created_at.desc())))
 
 
-def create_task(db: Session, org_id: str, *, client_id: str, title: str, onboarding_id: str | None = None,
-                assignee_id: str | None = None, due_on: dt.date | None = None) -> m.Task:
+def list_team_steps(db: Session, org_id: str, *, assignee_id: str | None = None, done: bool | None = None) -> list[dict]:
+    """The team's own task steps across every onboarding that is under way. They sit in the flow, so the Tasks page reads them from there."""
+    q = (select(m.Step, m.Onboarding).join(m.Onboarding, m.Onboarding.id == m.Step.onboarding_id)
+         .where(m.Step.org_id == org_id, m.Step.type == "task", m.Step.visibility == "internal", m.Onboarding.status.in_(("active", "paused"))))
+    if assignee_id:
+        q = q.where(m.Step.team_assignee_id == assignee_id)
+    out = []
+    for step, ob in db.execute(q):
+        finished = step.status in ("done", "skipped")
+        if done is not None and finished != done:
+            continue
+        out.append({"onboarding_id": ob.id, "key": step.key, "title": step.title, "client_id": ob.client_id, "status": step.status,
+                    "team_assignee_id": step.team_assignee_id, "due_at": step.due_at})
+    far = dt.datetime.max.replace(tzinfo=dt.timezone.utc)
+    out.sort(key=lambda r: (r["status"] in ("done", "skipped"), (r["due_at"] if r["due_at"] and r["due_at"].tzinfo else (r["due_at"].replace(tzinfo=dt.timezone.utc) if r["due_at"] else far))))
+    return out
+
+
+def create_task(db: Session, org_id: str, *, client_id: str, title: str, assignee_id: str | None = None, due_on: dt.date | None = None) -> m.Task:
     _client(db, org_id, client_id)
-    if onboarding_id and not db.scalar(select(m.Onboarding.id).where(
-            m.Onboarding.id == onboarding_id, m.Onboarding.org_id == org_id, m.Onboarding.client_id == client_id)):
-        raise NotFound("Onboarding not found.")
     if assignee_id:
         _member(db, org_id, assignee_id)
-    t = m.Task(org_id=org_id, client_id=client_id, onboarding_id=onboarding_id, title=redact(title.strip()), assignee_id=assignee_id, due_on=due_on)
+    t = m.Task(org_id=org_id, client_id=client_id, title=redact(title.strip()), assignee_id=assignee_id, due_on=due_on)
     db.add(t)
     db.flush()
     return t
@@ -537,7 +549,7 @@ def document_etag(doc: dict) -> str:
     return hashlib.sha256(json.dumps(doc, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
-def update_onboarding_steps(db: Session, org_id: str, onboarding_id: str, *, sections: list, steps: list, etag: str | None = None) -> m.Onboarding:
+def update_onboarding_steps(db: Session, org_id: str, onboarding_id: str, *, sections: list, steps: list, etag: str | None = None, notify_client: bool = True) -> m.Onboarding:
     """Replace an onboarding's sections and steps. A draft can change freely; after sending, the same rules hold (a step that
     holds answers, files or comments can be edited but not removed or retyped; skip it instead) and what depends on the steps is
     brought in line: new steps get due dates from the start, the onboarding reopens when it gains an open step or finishes when
@@ -548,6 +560,7 @@ def update_onboarding_steps(db: Session, org_id: str, onboarding_id: str, *, sec
     if etag is not None and etag != document_etag(ob.document):
         raise Conflict("These steps were changed by someone else after you opened them. Reload to see their changes, then make yours again.")
     sent = ob.status != "draft"
+    seen_before = changes.snapshot(ob.document)
     doc = _with_steps(ob.document, sections, steps)
     wanted = {d["key"]: d for d in doc["steps"]}
     existing = {s.key: s for s in ob.steps}
@@ -559,6 +572,8 @@ def update_onboarding_steps(db: Session, org_id: str, onboarding_id: str, *, sec
             problems.append(f"'{s.title}' already has answers, files or comments, so it can't be removed." + (" Skip it instead." if sent else ""))
         elif wanted[key]["type"] != s.type:
             problems.append(f"'{s.title}' already has answers, files or comments, so its type can't change.")
+        elif wanted[key]["visibility"] != s.visibility:
+            problems.append(f"'{s.title}' already has answers, files or comments, so who it is for can't change.")
     if problems:
         raise Conflict("Some steps can't be changed.", problems)
     old_roles = {d["key"]: d.get("assignee_role", "") for d in ob.document["steps"]}
@@ -583,6 +598,8 @@ def update_onboarding_steps(db: Session, org_id: str, onboarding_id: str, *, sec
     db.expire(ob, ["steps"])  # reload in position order
     if sent:
         _reconcile_status(db, ob)
+        if notify_client:
+            changes.note_edit(ob, seen_before, now())
     return ob
 
 

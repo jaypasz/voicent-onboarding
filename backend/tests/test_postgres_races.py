@@ -17,7 +17,7 @@ from tests.test_migrations import cfg
 pytestmark = pytest.mark.skipif(not os.environ.get("TEST_POSTGRES_URL"), reason="set TEST_POSTGRES_URL to run against a real Postgres")
 
 DOC = {"name": "Workspace", "slug": "workspace", "layout": "checklist", "on_complete": "provision_voicent_workspace",
-       "steps": [{"key": "build", "type": "internal_task", "title": "Build the agent", "config": {"checklist": ["Create it"]}}]}
+       "steps": [{"key": "build", "type": "task", "title": "Build the agent", "config": {"audience": "team", "checklist": ["Create it"]}}]}
 
 
 @pytest.fixture()

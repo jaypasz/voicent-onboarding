@@ -7,7 +7,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { useId, useState } from 'react'
 import { Icon } from '../components/Icon'
 import { ConfigEditor } from './ConfigEditor'
-import { FIELD_TYPES, STEP_KINDS, kindOf, move, newStep, toKey, uid, uniqueKey, withVisibility, type FieldDoc, type FieldType, type SectionDoc, type StepDoc, type StepKind } from './doc'
+import { FIELD_TYPES, STEP_KINDS, kindOf, move, newStep, toKey, uid, uniqueKey, isInternal, withVisibility, type FieldDoc, type FieldType, type SectionDoc, type StepDoc, type StepKind } from './doc'
 
 export interface BuilderValue {
   sections: SectionDoc[]
@@ -56,7 +56,7 @@ function EndZone({ empty }: { empty: boolean }) {
 
 function StepEditor({ step, sections, locked, onChange }: { step: StepDoc; sections: SectionDoc[]; locked: boolean; onChange: (s: StepDoc) => void }) {
   const id = useId()
-  const internal = kindOf(step.type)?.internal
+  const internal = isInternal(step)
   return (
     <div className="step-editor stack">
       <label className="field-group" htmlFor={`${id}-t`}><span>Title</span>
@@ -84,7 +84,7 @@ function StepEditor({ step, sections, locked, onChange }: { step: StepDoc; secti
       </div>
       {!internal && <p className="help">A role picks the contact with that role, for example “owner”. Leave it blank and anyone with a link can answer.</p>}
       <h4>{kindOf(step.type)?.label ?? step.type} settings</h4>
-      <ConfigEditor type={step.type} config={step.config} onChange={(config) => onChange({ ...step, config })} />
+      <ConfigEditor type={step.type} locked={locked} config={step.config} onChange={(config) => onChange({ ...step, config })} />
       <p className="help">Key: <code>{step.key}</code>{locked ? ' · has answers, files or comments, so it stays and keeps its type' : ''}</p>
     </div>
   )
@@ -109,7 +109,7 @@ function StepItem({ step, index, count, open, locked, sections, dropping, onTogg
         <button type="button" className="step-item-title" aria-expanded={open} aria-controls={panel} onClick={onToggle}>
           <strong>{step.title || 'Untitled step'}</strong>
           <span className="help">
-            {kind?.label ?? step.type}{section ? ` · ${section.title}` : ''}{kind?.internal ? ' · only you see it' : ''}{locked ? ' · has answers' : ''}
+            {kind?.label ?? step.type}{section ? ` · ${section.title}` : ''}{isInternal(step) ? ' · only you see it' : ''}{locked ? ' · has answers' : ''}
           </span>
         </button>
         <div className="step-item-actions">

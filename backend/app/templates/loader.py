@@ -37,11 +37,10 @@ def validate_document(doc) -> list[str]:
             known = ", ".join(t.type for t in registry.all_types() if t.implemented)
             problems.append(f"{where}.type: unknown step type '{step['type']}'. Available: {known}.")
             continue
-        vis = step.get("visibility")
-        if stype.client_visible and vis == "internal":
-            problems.append(f"{where}.visibility: only internal_task steps can be internal.")
-        if not stype.client_visible and vis == "client":
-            problems.append(f"{where}.visibility: internal_task steps are never shown to clients.")
+        vis, expected = step.get("visibility"), stype.visibility_for(step.get("config") or {})
+        if vis is not None and vis != expected:
+            problems.append(f"{where}.visibility: a '{step['type']}' step like this one is {'for the client' if expected == 'client' else 'internal'}; "
+                            "leave visibility out" + (" (a task's audience decides it)." if step["type"] == "task" else "."))
         problems += [f"{where}.config.{p}" if not p.startswith("The ") else f"{where}: {p}" for p in stype.validate_config(step.get("config", {}))]
     return problems
 
@@ -57,7 +56,7 @@ def normalise(doc: dict) -> dict:
         stype = registry.get(step["type"])
         step.setdefault("description", "")
         step.setdefault("section", "")
-        step["visibility"] = "client" if stype.client_visible else "internal"
+        step["visibility"] = stype.visibility_for(step.get("config") or {})
         step.setdefault("assignee_role", "")
         step.setdefault("due_offset_days", None)
         step.setdefault("config", {})

@@ -39,7 +39,7 @@ describe('StepResponse', () => {
       [{ type: 'book_call', response: resp({ booked: true }) }, /Booked/],
       [{ type: 'approval', response: resp({ decision: 'approved' }) }, /Approved/],
       [{ type: 'approval', response: resp({ decision: 'changes_requested', comment: 'Warmer' }) }, /Changes requested: "Warmer"/],
-      [{ type: 'internal_task', response: resp({ note: 'Built it' }, 'admin:jay@x.test') }, /Built it/],
+      [{ type: 'task', response: resp({ note: 'Built it', done: true }, 'admin:jay@x.test') }, /Built it/],
     ]
     for (const [over, re] of cases) {
       const { unmount } = render(<StepResponse onboardingId="o1" step={astep(over)} />)
@@ -118,7 +118,7 @@ describe('OnboardingDetail', () => {
   const draft: OnboardingDetail = {
     id: 'o1', client_id: 'cl1', title: 'Kickoff: Acme', layout: 'focus', status: 'draft', started_at: null, completed_at: null,
     last_activity_at: '2026-11-07T00:00:00Z', nudges_paused: false, attention: null, provision_state: null, progress: { done: 0, total: 2 },
-    steps: [astep({ id: 's1', key: 'basics', title: 'Basics' }), astep({ id: 's2', key: 'build', title: 'Build the agent', type: 'internal_task', visibility: 'internal' })],
+    steps: [astep({ id: 's1', key: 'basics', title: 'Basics' }), astep({ id: 's2', key: 'build', title: 'Build the agent', type: 'task', visibility: 'internal', config: { audience: 'team' } })],
   }
   const base = { 'GET /clients': { body: [client] }, 'GET /onboardings/o1/links': { body: [] }, ...panels }
   const at = (ui = <OnboardingDetailPage />) => renderRoute(ui, '/onboardings/:id', '/onboardings/o1')

@@ -54,9 +54,8 @@ def test_the_client_list_filters_by_stage(client):
 
 def test_tasks_are_created_assigned_dated_finished_and_removed(client):
     t, cl = mk(client)
-    ob = client.post("/api/onboardings", json={"client_id": cl["id"], "template_id": t["id"]}).json()
     me = client.get("/api/team").json()["members"]
-    task = client.post("/api/tasks", json={"client_id": cl["id"], "onboarding_id": ob["id"], "title": " Call Pat ", "due_on": "2026-12-01"})
+    task = client.post("/api/tasks", json={"client_id": cl["id"], "title": " Call Pat ", "due_on": "2026-12-01"})
     assert task.status_code == 201
     tid = task.json()["id"]
     assert task.json()["title"] == "Call Pat" and task.json()["done_at"] is None
@@ -84,18 +83,15 @@ def test_open_tasks_come_first_soonest_due_first(client):
     assert [x["id"] for x in client.get("/api/tasks").json()] == [soon, later, undated, finished]
 
 
-def test_a_task_must_point_at_this_orgs_client_onboarding_and_person(app_two_orgs):
+def test_a_task_must_point_at_this_orgs_client_and_person(app_two_orgs):
     c = app_two_orgs
     ha, hb = bearer("user-a"), bearer("user-b")
     t, a_client = mk(c, ha)
     b_client = c.post("/api/clients", json={"name": "Theirs"}, headers=hb).json()
     b_member = c.get("/api/team", headers=hb).json()["members"][0]["id"]
-    a_ob = c.post("/api/onboardings", json={"client_id": a_client["id"], "template_id": t["id"]}, headers=ha).json()
-    other = c.post("/api/clients", json={"name": "Other"}, headers=ha).json()
 
     assert c.post("/api/tasks", json={"client_id": b_client["id"], "title": "x"}, headers=ha).status_code == 404
     assert c.post("/api/tasks", json={"client_id": a_client["id"], "title": "x", "assignee_id": b_member}, headers=ha).status_code == 404
-    assert c.post("/api/tasks", json={"client_id": other["id"], "onboarding_id": a_ob["id"], "title": "x"}, headers=ha).status_code == 404
 
     mine = c.post("/api/tasks", json={"client_id": a_client["id"], "title": "mine"}, headers=ha).json()["id"]
     assert c.get("/api/tasks", headers=hb).json() == []

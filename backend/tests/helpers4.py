@@ -33,7 +33,7 @@ DOC = {
          "config": {"fields": [{"key": "name", "label": "Name", "type": "text", "required": True}]}},
         {"key": "it_access", "type": "connect", "title": "Grant IT access", "assignee_role": "it", "config": {"provider": "dns", "label": "DNS"}},
         {"key": "approve", "type": "approval", "title": "Approve the greeting", "config": {"deliverable": {"kind": "text", "text": "Hello"}}},
-        {"key": "build", "type": "internal_task", "title": "Build the agent", "config": {"checklist": ["Create it", "Test it"]}},
+        {"key": "build", "type": "task", "title": "Build the agent", "config": {"audience": "team", "checklist": ["Create it", "Test it"]}},
     ],
 }
 

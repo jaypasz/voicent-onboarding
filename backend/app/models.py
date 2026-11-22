@@ -198,6 +198,10 @@ class Onboarding(Stamped, Base):
     provision_lease_until: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     provision_error: Mapped[str] = mapped_column(String(300), default="", server_default="")  # our own wording, never the receiver's
     provisioned_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Telling the client about edits made after sending (changes.py): when the latest unannounced edit was made, and what the
+    # client's steps looked like before the first of them (title and fingerprint per client-visible step).
+    steps_changed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    client_seen_steps: Mapped[list | None] = mapped_column(JSON, nullable=True)
     voicent_workspace_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     # The team member who looks after this onboarding: told when it finishes or the client goes quiet.
     owner_member_id: Mapped[str | None] = mapped_column(ForeignKey("org_members.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -346,15 +350,14 @@ class Notification(Stamped, Base):
 
 
 class Task(Stamped, Base):
-    """A to-do for the team, about a client and optionally one of their onboardings. Ours alone: never shown to a client, never
-    sent to Voicent-App or the AIOS board. Separate from onboarding steps, which are what the client works through."""
+    """A standalone to-do for the team about a client ("chase the invoice"). Ours alone: never shown to a client, never sent to
+    Voicent-App or the AIOS board. Work that belongs to an onboarding is a team `task` step in its flow instead."""
 
     __tablename__ = "tasks"
     __table_args__ = (Index("ix_tasks_org_done_due", "org_id", "done_at", "due_on"),)
 
     org_id: Mapped[str] = org_fk()
     client_id: Mapped[str] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
-    onboarding_id: Mapped[str | None] = mapped_column(ForeignKey("onboardings.id", ondelete="CASCADE"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(200))
     assignee_id: Mapped[str | None] = mapped_column(ForeignKey("org_members.id", ondelete="SET NULL"), nullable=True, index=True)
     due_on: Mapped[dt.date | None] = mapped_column(Date, nullable=True)

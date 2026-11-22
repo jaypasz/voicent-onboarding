@@ -16,7 +16,7 @@ from tests.test_tenancy import ACME
 
 TPL = {"name": "Mini", "slug": "mini", "layout": "checklist", "steps": [
     {"key": "basics", "type": "form", "title": "Basics", "config": {"fields": [{"key": "name", "label": "Name", "type": "text"}]}},
-    {"key": "build", "type": "internal_task", "title": "Build it"}]}
+    {"key": "build", "type": "task", "title": "Build it", "config": {"audience": "team"}}]}
 
 
 class Directory:

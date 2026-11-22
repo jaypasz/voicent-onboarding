@@ -17,7 +17,7 @@ const team: Team = {
   linked: false, in_sync: true, can_manage: true, me: 'm-jay', invites: [],
   members: [{ id: 'm-jay', email: 'jay@x.test', name: 'Jay', role: 'admin', source: 'local', is_you: true, notify_email: true }],
 }
-const task = (over: Partial<Task> = {}): Task => ({ id: 't1', client_id: 'cl1', onboarding_id: null, title: 'Call Pat', assignee_id: null, due_on: null, done_at: null, created_at: '2026-11-20T00:00:00Z', ...over })
+const task = (over: Partial<Task> = {}): Task => ({ id: 't1', client_id: 'cl1', title: 'Call Pat', assignee_id: null, due_on: null, done_at: null, created_at: '2026-11-20T00:00:00Z', ...over })
 
 describe('the client list by stage', () => {
   const all = [client({ id: 'a', name: 'Anna', stage: 'lead' }), client({ id: 'b', name: 'Bo', stage: 'onboarding' }), client({ id: 'c', name: 'Cy', stage: 'won' }), client({ id: 'd', name: 'Di', stage: 'stalled', outcome: 'stalled' })]
@@ -84,6 +84,8 @@ describe('the tasks page', () => {
       'GET /clients': { body: [client()] }, 'GET /team': { body: team },
       'GET /tasks?done=false': { body: [task({ due_on: '2020-01-01' })] },
       'GET /tasks?assignee_id=m-jay&done=false': { body: [] },
+      'GET /tasks/in-onboardings?done=false': { body: [] },
+      'GET /tasks/in-onboardings?assignee_id=m-jay&done=false': { body: [] },
     })
     renderRoute(<TasksPage />, '/tasks', '/tasks')
     expect(await screen.findByText('Call Pat')).toBeInTheDocument()

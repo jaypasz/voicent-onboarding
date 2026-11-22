@@ -2,7 +2,7 @@ import type { TemplateDoc } from '../builder/doc'
 export type StepStatus = 'pending' | 'in_progress' | 'done' | 'skipped'
 export type OnboardingStatus = 'draft' | 'active' | 'paused' | 'completed' | 'archived'
 export type Layout = 'focus' | 'checklist'
-export type StepType = 'form' | 'upload' | 'connect' | 'book_call' | 'approval' | 'internal_task' | string
+export type StepType = 'form' | 'upload' | 'connect' | 'book_call' | 'approval' | 'task' | string
 
 export interface Progress {
   done: number
@@ -113,12 +113,22 @@ export type Stage = 'lead' | 'onboarding' | 'won' | 'lost' | 'stalled'
 export interface Task {
   id: string
   client_id: string
-  onboarding_id: string | null
   title: string
   assignee_id: string | null
   due_on: string | null
   done_at: string | null
   created_at: string
+}
+
+/** A team task that sits in an onboarding's flow. */
+export interface TeamStepTask {
+  onboarding_id: string
+  key: string
+  title: string
+  client_id: string
+  status: StepStatus
+  team_assignee_id: string | null
+  due_at: string | null
 }
 
 export interface TemplateSummary {
@@ -265,6 +275,8 @@ export interface OnboardingDocument {
   locked: string[]
   /** Which version of the steps this screen is looking at; sent back so a stale save is refused. */
   etag: string
+  /** The client will be told about earlier edits once the batch has been quiet for a few minutes. */
+  client_notice_pending: boolean
 }
 
 export interface TemplateCheck {
