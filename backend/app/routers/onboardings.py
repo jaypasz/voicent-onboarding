@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -10,7 +10,7 @@ from .. import aios_sync, magic_link, models as m, notifications, provision, ser
 from .. import nudges as reminders
 from ..deps import Actor, Auth, Db, Org, Session
 from ..errors import NotFound
-from ..schemas import CommentIn, NudgesIn, OnboardingIn, OnboardingStepsIn, StepAnswerIn, comment_out, onboarding_detail, onboarding_summary, step_out
+from ..schemas import CommentIn, NudgesIn, OnboardingIn, OnboardingStepsIn, ScheduleIn, StepAnswerIn, comment_out, onboarding_detail, onboarding_summary, step_out
 from ..storage import UploadsOff
 
 router = APIRouter(prefix="/onboardings", tags=["onboardings"])
@@ -195,6 +195,43 @@ def reopen(onboarding_id: str, key: str, request: Request, background: Backgroun
     aios_sync.kick(request, background, org, onboarding_id)
     services.reopen_step(db, org, onboarding_id, key)
     return _step(db, org, onboarding_id, key)
+
+
+@router.put("/{onboarding_id}/steps/{key}/schedule")
+def schedule(onboarding_id: str, key: str, body: ScheduleIn, request: Request, background: BackgroundTasks, db: Session = Db, org: str = Org):
+    """The day work on a step starts and the day it is due (picked on a calendar). Either can be cleared."""
+    aios_sync.kick(request, background, org, onboarding_id)
+    services.set_step_schedule(db, org, onboarding_id, key, start_on=body.start_on, due=body.due_on)
+    return _step(db, org, onboarding_id, key)
+
+
+def _may_sign_off(request: Request) -> None:
+    if request.state.role not in ("admin", "manager"):
+        raise HTTPException(403, "Only an admin or a manager can sign off a stage.")
+
+
+def _signer(db: Session, request: Request, actor: Actor) -> str:
+    member = db.get(m.OrgMember, request.state.member_id) if request.state.member_id else None
+    return (member.name or member.email) if member and (member.name or member.email) else actor.label
+
+
+@router.post("/{onboarding_id}/stages/{key}/signoff")
+def sign_off(onboarding_id: str, key: str, request: Request, background: BackgroundTasks, db: Session = Db, org: str = Org, actor: Actor = Auth):
+    """Our team signs a finished stage off, which opens the next stage to the client. Signing off the last one finishes it."""
+    _may_sign_off(request)
+    aios_sync.kick(request, background, org, onboarding_id)
+    provision.kick(request, background, org, onboarding_id)
+    notifications.kick(request, background)
+    ob = services.sign_off_stage(db, org, onboarding_id, key, member_id=request.state.member_id, signed_by=_signer(db, request, actor))
+    return onboarding_detail(ob)
+
+
+@router.delete("/{onboarding_id}/stages/{key}/signoff")
+def withdraw_sign_off(onboarding_id: str, key: str, request: Request, background: BackgroundTasks, db: Session = Db, org: str = Org):
+    """Take a sign-off back: later stages lock again for the client."""
+    _may_sign_off(request)
+    aios_sync.kick(request, background, org, onboarding_id)
+    return onboarding_detail(services.withdraw_signoff(db, org, onboarding_id, key))
 
 
 @router.post("/{onboarding_id}/steps/{key}/comments", status_code=201)

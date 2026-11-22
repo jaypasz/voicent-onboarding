@@ -45,6 +45,12 @@ export interface PortalStep {
   position: number
   status: StepStatus
   due_at: string | null
+  /** The day work on it is planned to start (YYYY-MM-DD). */
+  start_on?: string | null
+  /** The due day where the client is (YYYY-MM-DD). */
+  due_on?: string | null
+  /** In a stage that opens once the one before it is signed off: readable, not answerable. */
+  locked?: boolean
   config: Record<string, any>
   assignee: { id: string; name: string; is_you: boolean } | null
   can_write: boolean
@@ -60,10 +66,38 @@ export interface PortalView {
   client_name: string
   contact: { id: string; name: string }
   sections: { key: string; title: string }[]
+  /** The sections as stages, with where each stands for this client. Worked out from their own steps only. */
+  stages?: PortalStage[]
   progress: Progress
   steps: PortalStep[]
   /** Whose portal this is. A reseller's clients see the reseller, never Voicent. */
   brand?: Brand
+}
+
+/** waiting: everything of theirs is finished and it waits on our sign-off. */
+export type PortalStageState = 'locked' | 'open' | 'waiting' | 'signed_off' | 'done'
+
+export interface PortalStage {
+  key: string
+  title: string
+  signoff: boolean
+  state: PortalStageState
+}
+
+/** ready: every step is finished and it waits for a sign-off. */
+export type StageState = 'locked' | 'open' | 'ready' | 'signed_off' | 'done'
+
+export interface AdminStage {
+  key: string
+  title: string
+  signoff: boolean
+  state: StageState
+  signed_by: string | null
+  signed_at: string | null
+  progress: Progress
+  /** The earliest start and the latest due day of its steps. */
+  start_on: string | null
+  due_on: string | null
 }
 
 export interface Brand {
@@ -178,6 +212,11 @@ export interface AdminStep {
   status: StepStatus
   assignee_contact_id: string | null
   due_at: string | null
+  /** The due day where the client is (YYYY-MM-DD): what the calendar shows. */
+  due_on?: string | null
+  start_on?: string | null
+  /** The client can't work on it until an earlier stage is signed off. Our team still can. */
+  locked?: boolean
   completed_at: string | null
   config: Record<string, any>
   response: { revision: number; data: Record<string, any>; submitted_by: string; submitted_at: string } | null
@@ -187,6 +226,7 @@ export interface AdminStep {
 }
 
 export interface OnboardingDetail extends OnboardingSummary {
+  stages?: AdminStage[]
   steps: AdminStep[]
 }
 

@@ -19,7 +19,8 @@
         "type": "object", "additionalProperties": false, "required": ["key", "title"],
         "properties": {
           "key": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
-          "title": {"type": "string", "minLength": 1, "maxLength": 200}
+          "title": {"type": "string", "minLength": 1, "maxLength": 200},
+          "signoff": {"type": "boolean", "description": "Our team signs this stage off before the next one opens to the client. On unless set to false."}
         }
       }
     },

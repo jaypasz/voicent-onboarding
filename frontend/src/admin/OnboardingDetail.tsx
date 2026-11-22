@@ -1,17 +1,18 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router'
 import {
-  useAdminComment, useAnswerStep, useSetOwner, useSetStepFollower, useTeam, useClients, useOnboarding, useOnboardingAction, useSend, useStepAction,
+  useAdminComment, useAnswerStep, useOrgSettings, useSchedule, useSetOwner, useSetStepFollower, useSignOff, useTeam, useClients, useOnboarding,
+  useOnboardingAction, useSend, useStepAction,
 } from '../api/admin'
 import { ApiError } from '../api/http'
-import type { AdminStep, Contact, LinkInfo, TeamMember } from '../api/types'
+import type { AdminStage, AdminStep, Contact, LinkInfo, TeamMember } from '../api/types'
 import { memberLabel } from '../lib/team'
 import { Banner } from '../components/Banner'
 import { LoadError } from '../components/LoadError'
 import { ProgressBar } from '../components/ProgressBar'
-import { StepTracker } from '../components/StepTracker'
+import { StageTracker, StepTracker } from '../components/StepTracker'
 import { StepBadge } from '../components/StatusBadge'
-import { dueLabel, formatDateTime } from '../lib/format'
+import { STAGE_STATE, dayRange, dueLabel, formatDate, formatDateTime, formatDay } from '../lib/format'
 import StepResponse from './StepResponse'
 import { IssuedLinks } from './LinksPanel'
 
@@ -30,7 +31,80 @@ function TeamSelect({ label, value, members, onChange, disabled }: { label: stri
   )
 }
 
-function AdminStepCard({ id, step, contact, members }: { id: string; step: AdminStep; contact?: Contact; members: TeamMember[] }) {
+/** A popup calendar for the day a step starts and the day it is due. Each pick is saved at once. */
+function Schedule({ id, step, disabled }: { id: string; step: AdminStep; disabled: boolean }) {
+  const schedule = useSchedule(id)
+  const [error, setError] = useState<string | null>(null)
+  const [start, setStart] = useState(step.start_on ?? '')
+  const [due, setDue] = useState(step.due_on ?? '')
+  useEffect(() => { setStart(step.start_on ?? ''); setDue(step.due_on ?? '') }, [step.start_on, step.due_on])
+  // Typing a year into a date field passes through 0002, 0020 and 0202 on the way to 2026: only a real year is saved.
+  const ready = (d: string) => d === '' || Number(d.slice(0, 4)) >= 2000
+  async function save(next: { start_on: string; due_on: string }) {
+    setStart(next.start_on)
+    setDue(next.due_on)
+    if (!ready(next.start_on) || !ready(next.due_on)) return
+    setError(null)
+    try { await schedule.mutateAsync({ key: step.key, start_on: next.start_on || null, due_on: next.due_on || null }) } catch (e) { setError(errText(e)) }
+  }
+  return (
+    <fieldset className="schedule" disabled={disabled || schedule.isPending}>
+      <legend>Schedule</legend>
+      <div className="row wrap">
+        <label className="field-group"><span>Starts</span>
+          <input type="date" value={start} max={due || undefined} onChange={(e) => void save({ start_on: e.target.value, due_on: due })} />
+        </label>
+        <label className="field-group"><span>Due</span>
+          <input type="date" value={due} min={start || undefined} onChange={(e) => void save({ start_on: start, due_on: e.target.value })} />
+        </label>
+        {(start || due) && <button type="button" className="btn btn-small" onClick={() => void save({ start_on: '', due_on: '' })}>Clear dates</button>}
+      </div>
+      {error && <p className="field-error" role="alert">{error}</p>}
+    </fieldset>
+  )
+}
+
+function StageHeader({ id, stage, index, previous, canSign, onError }: {
+  id: string; stage: AdminStage; index: number; previous?: AdminStage; canSign: boolean; onError: (e: string | null) => void
+}) {
+  const sign = useSignOff(id)
+  const { glyph, label } = STAGE_STATE[stage.state]
+  const dates = dayRange(stage.start_on, stage.due_on)
+  const run = async (withdraw: boolean) => { onError(null); try { await sign.mutateAsync({ key: stage.key, withdraw }) } catch (e) { onError(errText(e)) } }
+  return (
+    <div className="stage-summary">
+      <h2 id={`stage-${stage.key}`}><span className="stage-number" aria-hidden="true">{index + 1}</span> {stage.title}</h2>
+      <div className="row wrap stage-meta">
+        <span className={`badge stage-${stage.state}`}><span aria-hidden="true">{glyph}</span> {label}</span>
+        <span className="due">{stage.progress.done} of {stage.progress.total} done</span>
+        {dates && <span className="due">{dates}</span>}
+        {!stage.signoff && <span className="due">No sign-off needed</span>}
+      </div>
+      {stage.state === 'locked' && previous && (
+        <p className="help">The client sees these steps but can't answer them until “{previous.title}” is signed off. Your team can work on them now.</p>
+      )}
+      {stage.state === 'ready' && (
+        <div className="row wrap">
+          <button type="button" className="btn btn-primary" disabled={!canSign || sign.isPending} onClick={() => void run(false)}>
+            {sign.isPending ? 'Signing off…' : `Sign off “${stage.title}”`}
+          </button>
+          <p className="help">{canSign ? 'Every step is finished. Signing off opens the next stage to the client.' : 'Every step is finished. An admin or a manager signs it off.'}</p>
+        </div>
+      )}
+      {stage.state === 'signed_off' && (
+        <div className="row wrap">
+          <p className="help">✓ Signed off by {stage.signed_by || 'your team'} on {formatDate(stage.signed_at)}.</p>
+          {canSign && (
+            <button type="button" className="btn btn-small" disabled={sign.isPending}
+              onClick={() => window.confirm(`Withdraw the sign-off of “${stage.title}”? The stages after it lock again for the client.`) && void run(true)}>Withdraw sign-off</button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AdminStepCard({ id, step, contact, members, closed }: { id: string; step: AdminStep; contact?: Contact; members: TeamMember[]; closed: boolean }) {
   const follower = useSetStepFollower(id)
   const ours = members.find((m) => m.id === step.team_assignee_id)
   const action = useStepAction(id)
@@ -44,7 +118,7 @@ function AdminStepCard({ id, step, contact, members }: { id: string; step: Admin
   const [text, setText] = useState('')
   const [visible, setVisible] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const due = dueLabel(step.due_at, step.status)
+  const due = dueLabel(step.due_at, step.status, undefined, step.due_on)
   const items: string[] = step.type === 'task' ? step.config.checklist ?? [] : []
   const ticked: number[] = (step.response?.data.checked as number[] | undefined) ?? []
   const run = async (fn: () => Promise<unknown>) => { setError(null); try { await fn() } catch (e) { setError(errText(e)) } }
@@ -64,13 +138,16 @@ function AdminStepCard({ id, step, contact, members }: { id: string; step: Admin
           {step.visibility === 'internal' && <span className="badge">🔒 Internal. Never shown to the client</span>}
           {contact && <span className="due">For {contact.name}</span>}
           {ours && <span className="due">Ours: {memberLabel(ours)}</span>}
+          {step.start_on && step.status !== 'done' && step.status !== 'skipped' && <span className="due">Starts {formatDay(step.start_on)}</span>}
           {due && <span className={due.overdue ? 'due due-overdue' : 'due'}>{due.overdue ? '⚠ ' : ''}{due.text}</span>}
+          {step.locked && step.visibility === 'client' && <span className="due">🔒 Not open to the client yet</span>}
         </span>
         <span aria-hidden="true" className="chev">{open ? '▾' : '▸'}</span>
       </button>
       {open && (
         <div className="step-panel">
           {error && <Banner kind="error">{error}</Banner>}
+          <Schedule id={id} step={step} disabled={closed} />
           {members.length > 0 && (
             <TeamSelect label="Followed up by (our side)" value={step.team_assignee_id} members={members} disabled={follower.isPending}
               onChange={(member_id) => void run(() => follower.mutateAsync({ key: step.key, member_id }))} />
@@ -131,6 +208,7 @@ export default function OnboardingDetail() {
   const send = useSend(id)
   const team = useTeam()
   const owner = useSetOwner(id)
+  const org = useOrgSettings()
   const [issued, setIssued] = useState<LinkInfo[]>([])
   const [error, setError] = useState<string | null>(null)
 
@@ -141,19 +219,22 @@ export default function OnboardingDetail() {
   const contacts = client?.contacts ?? []
   const members = team.data?.members ?? []
   const run = async (fn: () => Promise<unknown>) => { setError(null); try { await fn() } catch (e) { setError(errText(e)) } }
+  const role = org.data?.role
+  const canSign = !role || role === 'admin' || role === 'manager'  // the server checks again
+  const closed = o.status === 'archived'
 
-  const sections: { key: string; steps: AdminStep[] }[] = []
-  for (const s of o.steps) {
-    const last = sections[sections.length - 1]
-    if (last && last.key === s.section) last.steps.push(s)
-    else sections.push({ key: s.section, steps: [s] })
-  }
-  const pretty = (k: string) => (k ? k.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()) : 'Steps')
+  // The steps grouped by stage, in stage order (the server sends them in that order); steps outside a stage come last.
+  const stages = o.stages ?? []
+  const inStage = new Set(stages.map((st) => st.key))
+  const loose = o.steps.filter((s) => !inStage.has(s.section))
+  const card = (s: AdminStep) => <AdminStepCard key={s.id} id={id} step={s} contact={contacts.find((c) => c.id === s.assignee_contact_id)} members={members} closed={closed} />
 
   return (
     <div className="stack">
       <ProgressBar progress={o.progress} />
-      <StepTracker steps={o.steps} />
+      {stages.length > 0
+        ? <StageTracker stages={stages.map((st) => ({ key: st.key, title: st.title, state: st.state, detail: `${st.progress.done}/${st.progress.total}` }))} />
+        : <StepTracker steps={o.steps} />}
       {members.length > 0 && (
         <div className="owner-row">
           <TeamSelect label="Looked after by" value={o.owner_member_id} members={members} disabled={owner.isPending}
@@ -179,12 +260,18 @@ export default function OnboardingDetail() {
       {o.status === 'draft' && contacts.length === 0 && <Banner kind="warn">This client has no contacts yet, so there is nobody to send a link to. <Link to={`/clients/${o.client_id}`}>Add a contact</Link>.</Banner>}
       {o.status === 'draft' && <Banner>This is a draft. The client can't see anything until you send it, and you can still <Link to={`/onboardings/${id}/steps`}>change the steps</Link>.</Banner>}
 
-      {sections.map((g, i) => (
-        <section key={`${g.key}-${i}`} className="section" aria-label={pretty(g.key)}>
-          <h2>{pretty(g.key)}</h2>
-          <ul className="steps">{g.steps.map((s) => <AdminStepCard key={s.id} id={id} step={s} contact={contacts.find((c) => c.id === s.assignee_contact_id)} members={members} />)}</ul>
+      {stages.map((st, i) => (
+        <section key={st.key} className={`section stage-section stage-section-${st.state}`} aria-labelledby={`stage-${st.key}`}>
+          <StageHeader id={id} stage={st} index={i} previous={stages.slice(0, i).reverse().find((p) => p.signoff && p.state !== 'signed_off')} canSign={canSign} onError={setError} />
+          <ul className="steps">{o.steps.filter((s) => s.section === st.key).map(card)}</ul>
         </section>
       ))}
+      {loose.length > 0 && (
+        <section className="section" aria-labelledby="stage-none">
+          <h2 id="stage-none">{stages.length ? 'Not in a stage' : 'Steps'}</h2>
+          <ul className="steps">{loose.map(card)}</ul>
+        </section>
+      )}
 
     </div>
   )

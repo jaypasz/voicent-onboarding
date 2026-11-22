@@ -93,18 +93,51 @@ describe('StepsBuilder', () => {
     expect((spy.mock.calls.at(-1)![0] as BuilderValue).steps[0].config.checklist).toEqual(['Create it', 'Test it on a call'])
   })
 
-  test('removing a section moves its steps out of it', async () => {
+  test('stages group the steps, need a sign-off unless told otherwise, and removing one keeps its steps', async () => {
     const spy = vi.fn()
     render(<Harness spy={spy} />)
-    await userEvent.click(screen.getByText('Sections'))
-    await userEvent.type(screen.getByLabelText('New section'), 'Brand{Enter}')
-    await userEvent.click(screen.getByRole('button', { name: /Basics/, expanded: false }))
-    await userEvent.selectOptions(screen.getByLabelText('Section'), 'brand')
-    expect((spy.mock.calls.at(-1)![0] as BuilderValue).steps[0].section).toBe('brand')
-    await userEvent.click(screen.getByRole('button', { name: 'Remove section Brand' }))
-    const last = spy.mock.calls.at(-1)![0] as BuilderValue
+    await userEvent.type(screen.getByLabelText('Group the steps into stages'), 'Brand{Enter}')
+    let last = spy.mock.calls.at(-1)![0] as BuilderValue
+    expect(last.sections).toEqual([{ key: 'brand', title: 'Brand', signoff: true }])
+    const stage = screen.getByRole('region', { name: 'Stage 1: Brand' })
+    expect(within(stage).getByText(/Drag steps into “Brand”/)).toBeInTheDocument()
+    expect(within(stage).getByRole('checkbox', { name: /signs this stage off/ })).toBeChecked()
+
+    await userEvent.click(screen.getByRole('button', { name: /Approve/, expanded: false }))
+    await userEvent.selectOptions(screen.getByLabelText('Stage'), 'brand')
+    last = spy.mock.calls.at(-1)![0] as BuilderValue
+    expect(last.steps.map((s) => [s.key, s.section])).toEqual([['approve', 'brand'], ['basics', '']])  // steps sit with their stage, in stage order
+    expect(within(screen.getByRole('list', { name: 'Steps in Brand, in order' })).getByText('Approve')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Not in a stage' })).getByText('Basics')).toBeInTheDocument()
+
+    // a tap in the menu adds to the stage of the step being edited
+    await userEvent.click(screen.getByRole('button', { name: /File upload.*add to “Brand”/ }))
+    expect((spy.mock.calls.at(-1)![0] as BuilderValue).steps.map((s) => [s.type, s.section])).toEqual([['approval', 'brand'], ['upload', 'brand'], ['form', '']])
+
+    await userEvent.click(within(stage).getByRole('checkbox', { name: /signs this stage off/ }))
+    expect((spy.mock.calls.at(-1)![0] as BuilderValue).sections[0].signoff).toBe(false)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Remove stage “Brand”' }))
+    last = spy.mock.calls.at(-1)![0] as BuilderValue
     expect(last.sections).toEqual([])
-    expect(last.steps[0].section).toBe('')
+    expect(last.steps.every((s) => s.section === '')).toBe(true)
+  })
+
+  test('moving a stage moves its steps with it', async () => {
+    const spy = vi.fn()
+    function Two() {
+      const [value, setValue] = useState<BuilderValue>({
+        sections: [{ key: 'one', title: 'One' }, { key: 'two', title: 'Two' }],
+        steps: prepare([{ ...FORM, section: 'one' }, { ...APPROVE, section: 'two' }]),
+      })
+      return <StepsBuilder value={value} onChange={(v) => { setValue(v); spy(v) }} />
+    }
+    render(<Two />)
+    await userEvent.click(screen.getByRole('button', { name: 'Move stage “Two” up' }))
+    const last = spy.mock.calls.at(-1)![0] as BuilderValue
+    expect(last.sections.map((s) => s.key)).toEqual(['two', 'one'])
+    expect(last.steps.map((s) => s.key)).toEqual(['approve', 'basics'])
+    expect(screen.getByRole('region', { name: 'Stage 1: Two' })).toBeInTheDocument()
   })
 })
 

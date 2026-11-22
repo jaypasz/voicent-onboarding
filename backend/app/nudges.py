@@ -20,7 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from . import branding, magic_link, notifications
+from . import branding, magic_link, notifications, stages
 from . import models as m
 from .config import Settings, valid_timezone
 from .errors import Conflict
@@ -59,10 +59,12 @@ def in_quiet_hours(now: dt.datetime, tz_name: str, start: int, end: int, fallbac
 
 
 def open_steps(ob: m.Onboarding, contact: m.Contact, primary: m.Contact | None) -> list[m.Step]:
-    """Client steps still to do that belong to this contact. Unassigned ones belong to the first contact."""
+    """Client steps still to do that belong to this contact, and are open to them (not in a stage waiting on our sign-off).
+    Unassigned ones belong to the first contact."""
     out = []
-    for s in ob.steps:
-        if s.visibility != "client" or s.status not in ("pending", "in_progress"):
+    locked = stages.locked_keys(ob)  # a stage waiting on our sign-off isn't the client's to do yet
+    for s in stages.ordered_steps(ob, list(ob.steps)):
+        if s.visibility != "client" or s.status not in ("pending", "in_progress") or s.key in locked:
             continue
         if s.assignee_contact_id == contact.id or (s.assignee_contact_id is None and primary is not None and contact.id == primary.id):
             out.append(s)
@@ -206,8 +208,9 @@ def run_nudges(sm: sessionmaker, settings: Settings, notifier: Notifier, now: dt
             ob = db.get(m.Onboarding, oid)
             if ob is None or ob.status != "active" or ob.nudges_paused or not _stalled(db, settings, ob, now):
                 continue
-            if not any(s.visibility == "client" and s.status in ("pending", "in_progress") for s in ob.steps):
-                continue  # the client has nothing left to do
+            locked = stages.locked_keys(ob)
+            if not any(s.visibility == "client" and s.status in ("pending", "in_progress") and s.key not in locked for s in ob.steps):
+                continue  # the client has nothing left to do, or what is left waits on our sign-off
             rounds = db.scalar(select(func.count(func.distinct(m.Nudge.round))).where(m.Nudge.onboarding_id == ob.id, m.Nudge.template == "stalled", m.Nudge.status == "sent")) or 0
             if rounds >= settings.nudge_max:
                 if ob.attention != "nudges_exhausted":

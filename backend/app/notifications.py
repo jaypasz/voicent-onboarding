@@ -82,6 +82,20 @@ def onboarding_completed(db, ob: m.Onboarding) -> None:
     notify(db, ob.org_id, ob.owner_member_id, "completed", f"“{ob.title}” is finished.", onboarding_id=ob.id)
 
 
+def stage_ready(db, ob: m.Onboarding, key: str, title: str) -> None:
+    """Every step of a stage is finished: the owner is asked to sign it off. Once per stage, even if it is reopened and finished again."""
+    seen = db.scalar(select(m.Notification.id).where(m.Notification.onboarding_id == ob.id, m.Notification.kind == "stage_ready",
+                                                       m.Notification.step_key == key).limit(1))
+    if seen is None:
+        notify(db, ob.org_id, ob.owner_member_id, "stage_ready", f"“{title}” in “{ob.title}” is ready for your sign-off.",
+               onboarding_id=ob.id, step_key=key)
+
+
+def stage_signed_off(db, ob: m.Onboarding, title: str, by_member_id: str | None) -> None:
+    notify(db, ob.org_id, ob.owner_member_id, "stage_signed_off", f"“{title}” in “{ob.title}” was signed off.",
+           onboarding_id=ob.id, by_member_id=by_member_id)
+
+
 def client_gone_quiet(db, ob: m.Onboarding, rounds: int) -> None:
     notify(db, ob.org_id, ob.owner_member_id, "quiet",
            f"“{ob.title}”: no reply after {rounds} reminder{'s' if rounds != 1 else ''}. A call might help.", onboarding_id=ob.id)

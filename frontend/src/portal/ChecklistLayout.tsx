@@ -1,14 +1,15 @@
 import { useState } from 'react'
-import type { PortalStep, PortalView } from '../api/types'
+import type { PortalStageState, PortalStep, PortalView } from '../api/types'
 import { StepBadge } from '../components/StatusBadge'
-import { dueLabel } from '../lib/format'
+import { STAGE_STATE, dueLabel } from '../lib/format'
 import { isOpen as waitsOnContact } from './FocusLayout'
 import StepPanel from './StepPanel'
 
-function groups(view: PortalView): { key: string; title: string; steps: PortalStep[] }[] {
-  const out = view.sections.map((s) => ({ key: s.key, title: s.title, steps: view.steps.filter((x) => x.section === s.key) }))
+function groups(view: PortalView): { key: string; title: string; state?: PortalStageState; steps: PortalStep[] }[] {
+  const state = new Map((view.stages ?? []).map((s) => [s.key, s.state]))
+  const out = view.sections.map((s) => ({ key: s.key, title: s.title, state: state.get(s.key), steps: view.steps.filter((x) => x.section === s.key) }))
   const loose = view.steps.filter((x) => !view.sections.some((s) => s.key === x.section))
-  if (loose.length) out.push({ key: '_', title: out.length ? 'Other' : 'Steps', steps: loose })
+  if (loose.length) out.push({ key: '_', title: out.length ? 'Other' : 'Steps', state: undefined, steps: loose })
   return out.filter((g) => g.steps.length)
 }
 
@@ -27,10 +28,13 @@ export default function ChecklistLayout({ view, onChanged, preview = false }: { 
             <h2 id={`sec-${g.key}`}>
               {g.title} <span className="help">({done} of {g.steps.length} done)</span>
             </h2>
+            {g.state && g.state !== 'open' && (
+              <p className={`badge stage-${g.state}`}><span aria-hidden="true">{STAGE_STATE[g.state].glyph}</span> {g.state === 'locked' ? 'Opens once we have reviewed the part before' : STAGE_STATE[g.state].label}</p>
+            )}
             <ul className="steps">
               {g.steps.map((s) => {
                 const isOpen = expanded.has(s.key)
-                const due = dueLabel(s.due_at, s.status)
+                const due = dueLabel(s.due_at, s.status, undefined, s.due_on)
                 return (
                   <li key={s.key} className={`step step-${s.status}`}>
                     <button className="step-toggle" aria-expanded={isOpen} aria-controls={`panel-${s.key}`} onClick={() => toggle(s.key)}>

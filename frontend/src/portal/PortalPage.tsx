@@ -4,7 +4,7 @@ import { useParams } from 'react-router'
 import type { PortalView } from '../api/types'
 import { Banner } from '../components/Banner'
 import { ProgressBar } from '../components/ProgressBar'
-import { StepTracker } from '../components/StepTracker'
+import { StageTracker, StepTracker } from '../components/StepTracker'
 import ChecklistLayout from './ChecklistLayout'
 import FocusLayout from './FocusLayout'
 import { PortalSessionProvider, usePortal } from './session'
@@ -73,7 +73,9 @@ export function PortalScreen({ view, onChanged, preview = false }: { view: Porta
           <div className="eyebrow">{view.client_name}</div>
           <h1>{view.title}</h1>
           <ProgressBar progress={view.progress} label="Your progress" />
-          <StepTracker steps={view.steps} label="Your steps" />
+          {view.stages?.length
+            ? <StageTracker stages={view.stages} label="Your stages" />
+            : <StepTracker steps={view.steps} label="Your steps" />}
         </header>
         {view.status === 'paused' && <Banner kind="warn">This onboarding is paused. You can read everything, but changes are switched off until we resume it.</Banner>}
         {view.status === 'completed' && <Banner kind="ok">This onboarding is complete. Thank you!</Banner>}

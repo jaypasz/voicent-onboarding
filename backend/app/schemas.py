@@ -6,6 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from . import models as m
+from . import services, stages
 from .config import valid_timezone
 
 ClientKind = Literal["trades", "agency", "msp", "other"]
@@ -112,6 +113,12 @@ class OnboardingStepsIn(BaseModel):
     notify_client: bool = True
 
 
+class ScheduleIn(BaseModel):
+    """A step's schedule as calendar days. Both are replaced: leave one out (or null) to clear it."""
+    start_on: dt.date | None = None
+    due_on: dt.date | None = None
+
+
 class StepAnswerIn(BaseModel):
     data: Any
 
@@ -137,14 +144,17 @@ def comment_out(c: m.StepComment) -> dict:
             "client_visible": c.client_visible, "created_at": c.created_at}
 
 
-def step_out(ob: m.Onboarding, s: m.Step) -> dict:
+def step_out(ob: m.Onboarding, s: m.Step, locked: set[str] | None = None) -> dict:
     """The admin's view of a step: everything, internal steps included."""
     cfg = next(d["config"] for d in ob.document["steps"] if d["key"] == s.key)
+    locked = stages.locked_keys(ob) if locked is None else locked
+    tz = ob.client.timezone if ob.client else "UTC"
     last = s.responses[-1] if s.responses else None
     return {
         "id": s.id, "key": s.key, "type": s.type, "title": s.title, "section": s.section, "position": s.position,
         "visibility": s.visibility, "status": s.status, "assignee_contact_id": s.assignee_contact_id, "team_assignee_id": s.team_assignee_id,
-        "due_at": s.due_at, "completed_at": s.completed_at, "config": cfg,
+        "due_at": s.due_at, "due_on": services.due_on(s, tz), "start_on": s.start_on, "completed_at": s.completed_at, "config": cfg,
+        "locked": s.key in locked,  # the client can't work on it until an earlier stage is signed off
         "response": {"revision": last.revision, "data": last.data, "submitted_by": last.submitted_by, "submitted_at": last.submitted_at} if last else None,
         "revisions": len(s.responses),
         "files": [{"id": f.id, "name": f.name, "size": f.size, "content_type": f.content_type} for f in s.files],
@@ -163,8 +173,25 @@ def onboarding_summary(ob: m.Onboarding) -> dict:
     }
 
 
+def stage_out(ob: m.Onboarding, st: stages.Stage) -> dict:
+    tz = ob.client.timezone if ob.client else "UTC"
+    live = [s for s in st.steps if s.status != "skipped"]
+    starts = [s.start_on for s in st.steps if s.start_on]
+    dues = [d for d in (services.due_on(s, tz) for s in st.steps) if d]
+    return {
+        "key": st.key, "title": st.title, "signoff": st.signoff, "state": st.state,
+        "signed_by": st.signed.signed_by if st.signed else None, "signed_at": st.signed.signed_at if st.signed else None,
+        "progress": {"done": sum(1 for s in live if s.status == "done"), "total": len(live)},
+        "start_on": min(starts) if starts else None, "due_on": max(dues) if dues else None,
+    }
+
+
 def onboarding_detail(ob: m.Onboarding) -> dict:
-    return onboarding_summary(ob) | {"steps": [step_out(ob, s) for s in ob.steps]}
+    locked = stages.locked_keys(ob)
+    return onboarding_summary(ob) | {
+        "stages": [stage_out(ob, st) for st in stages.stages(ob)],
+        "steps": [step_out(ob, s, locked) for s in stages.ordered_steps(ob, list(ob.steps))],
+    }
 
 
 class TaskIn(BaseModel):

@@ -161,5 +161,9 @@ export const useMarkRead = () => useWrite((ids?: string[]) => request('/notifica
 
 export const useSetOwner = (id: string) =>
   useWrite((member_id: string | null) => request<OnboardingDetail>(`/onboardings/${id}/owner`, { method: 'PUT', body: { member_id } }), () => [k.onboarding(id), k.onboardings])
+export const useSchedule = (id: string) =>
+  useWrite((a: { key: string; start_on: string | null; due_on: string | null }) => request(`/onboardings/${id}/steps/${a.key}/schedule`, { method: 'PUT', body: { start_on: a.start_on, due_on: a.due_on } }), () => [k.onboarding(id), k.onboardings])
+export const useSignOff = (id: string) =>
+  useWrite((a: { key: string; withdraw?: boolean }) => request(`/onboardings/${id}/stages/${a.key}/signoff`, { method: a.withdraw ? 'DELETE' : 'POST', ...(a.withdraw ? {} : { body: {} }) }), () => [k.onboarding(id), k.onboardings, ['provision', id]])
 export const useSetStepFollower = (id: string) =>
   useWrite((a: { key: string; member_id: string | null }) => request(`/onboardings/${id}/steps/${a.key}/team-assignee`, { method: 'PUT', body: { member_id: a.member_id } }), () => [k.onboarding(id)])

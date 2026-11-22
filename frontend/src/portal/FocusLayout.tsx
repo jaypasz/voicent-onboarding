@@ -4,14 +4,14 @@ import { Banner } from '../components/Banner'
 import { STEP_STATUS } from '../lib/format'
 import StepPanel from './StepPanel'
 
-type Navigable = { status: string; can_write: boolean; assignee?: { is_you: boolean } | null }
+type Navigable = { status: string; can_write: boolean; locked?: boolean; assignee?: { is_you: boolean } | null }
 
 /**
  * Whether a step still waits on this contact. A preview has writing switched off on every step,
  * so there it goes by the step's own status and who it is for, as the real portal would.
  */
 export const isOpen = (s: Navigable, preview: boolean) =>
-  s.status !== 'done' && s.status !== 'skipped' && (preview ? !s.assignee || s.assignee.is_you : s.can_write)
+  s.status !== 'done' && s.status !== 'skipped' && !s.locked && (preview ? !s.assignee || s.assignee.is_you : s.can_write)
 
 /** The first step to work on after `from`, wrapping round. -1 when everything the client can do is done. */
 export function nextOpenIndex(steps: Navigable[], from: number, preview = false): number {
@@ -35,6 +35,20 @@ export default function FocusLayout({ view, onChanged, preview = false }: { view
   }, [advance, steps, index, preview])
 
   const allDone = nextOpenIndex(steps, -1, preview) === -1 && view.status !== 'paused'
+  // Nothing to do right now, but more to come: what is left opens once we've signed off the part they finished.
+  const later = steps.some((s) => s.locked && s.status !== 'done' && s.status !== 'skipped')
+  if (allDone && !reviewing && later) {
+    return (
+      <div className="stack center">
+        <Banner kind="ok">
+          <strong>Thanks, {view.contact.name.split(' ')[0]}. That's this part done.</strong> We're reviewing it now. The next part opens once we've signed it off, and we'll let you know.
+        </Banner>
+        <button className="btn btn-big" onClick={() => { setIndex(0); setReviewing(true) }}>
+          Review your answers
+        </button>
+      </div>
+    )
+  }
   if (allDone && !reviewing) {
     return (
       <div className="stack center">
@@ -50,6 +64,7 @@ export default function FocusLayout({ view, onChanged, preview = false }: { view
   if (!steps.length) return <Banner>There is nothing for you to do here yet.</Banner>
 
   const step = steps[Math.min(index, steps.length - 1)]
+  const stageTitle = view.stages?.find((st) => st.key === step.section)?.title ?? ''
   return (
     <div className="stack">
       <nav aria-label="Steps" className="dots">
@@ -67,7 +82,7 @@ export default function FocusLayout({ view, onChanged, preview = false }: { view
       </nav>
       <h2 className="step-title">
         <span className="step-count">
-          Step {index + 1} of {steps.length}
+          Step {index + 1} of {steps.length}{stageTitle ? ` · ${stageTitle}` : ''}
         </span>
         {step.title}
       </h2>

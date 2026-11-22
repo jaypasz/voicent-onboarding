@@ -1,4 +1,4 @@
-import type { OnboardingStatus, Stage, StepStatus } from '../api/types'
+import type { OnboardingStatus, PortalStageState, Stage, StageState, StepStatus } from '../api/types'
 
 // Colour never carries meaning alone: every status has a glyph and a word.
 export const STEP_STATUS: Record<StepStatus, { glyph: string; label: string }> = {
@@ -44,6 +44,24 @@ export function formatDate(iso: string | null | undefined): string {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
+/** "Dec 1 – Dec 3, 2026", or just the end, or just the start. */
+export function dayRange(start: string | null | undefined, end: string | null | undefined): string {
+  if (start && end) return start === end ? formatDay(end) : `${formatDay(start)} – ${formatDay(end)}`
+  if (end) return `Due ${formatDay(end)}`
+  if (start) return `Starts ${formatDay(start)}`
+  return ''
+}
+
+/** Every stage state has a glyph and a word, as colour never carries meaning alone. */
+export const STAGE_STATE: Record<StageState | PortalStageState, { glyph: string; label: string }> = {
+  locked: { glyph: '🔒', label: 'Not open yet' },
+  open: { glyph: '◐', label: 'In progress' },
+  ready: { glyph: '⏳', label: 'Ready for sign-off' },
+  waiting: { glyph: '⏳', label: 'With us for review' },
+  signed_off: { glyph: '✓', label: 'Signed off' },
+  done: { glyph: '✓', label: 'Done' },
+}
+
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return ''
   const d = new Date(iso)
@@ -51,12 +69,14 @@ export function formatDateTime(iso: string | null | undefined): string {
 }
 
 /** "Due Nov 12" or "Overdue since Nov 5". Empty when there is no date or the step is finished. */
-export function dueLabel(due: string | null, status: StepStatus, now = new Date()): { text: string; overdue: boolean } | null {
+/** `day` is the due day where the client is (YYYY-MM-DD), when known: it is what is shown, whatever the browser's time zone. */
+export function dueLabel(due: string | null, status: StepStatus, now = new Date(), day?: string | null): { text: string; overdue: boolean } | null {
   if (!due || status === 'done' || status === 'skipped') return null
   const d = new Date(due)
   if (Number.isNaN(d.getTime())) return null
   const overdue = d.getTime() < now.getTime()
-  return { text: overdue ? `Overdue since ${formatDate(due)}` : `Due ${formatDate(due)}`, overdue }
+  const shown = day ? formatDay(day) : formatDate(due)
+  return { text: overdue ? `Overdue since ${shown}` : `Due ${shown}`, overdue }
 }
 
 export function formatBytes(n: number): string {
