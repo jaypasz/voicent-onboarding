@@ -1,6 +1,6 @@
 # Deploy: Railway + Supabase
 
-One Railway service builds the `Dockerfile` (React build, then FastAPI serving the app and `/api`). Supabase supplies Postgres, admin login and file storage. `railway.json` sets the health check (`/api/health`). Deployed on Railway (2026-11-20).
+One Railway service builds the `Dockerfile` (React build, then FastAPI serving the app and `/api`). Supabase supplies Postgres, admin login and file storage. The service's build and deploy settings (Dockerfile, health check `/api/health` with a 120-second timeout, `alembic upgrade head` before deploy, restart on failure up to 5 times) are in `.railway/railway.ts`. Railway doesn't read that file when it deploys: after changing it, run `railway config plan` and then `railway config apply` from the repo (`npm install` in `.railway/` first). Variables are left to Railway (`variables: { managed: false }`), so the file never holds or changes a secret. Deployed on Railway (2026-11-20).
 
 ## Variables (Railway service > Variables)
 
