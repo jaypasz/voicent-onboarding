@@ -202,6 +202,10 @@ class Onboarding(Stamped, Base):
     # client's steps looked like before the first of them (title and fingerprint per client-visible step).
     steps_changed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     client_seen_steps: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Telling the client a stage opened (stage_notices.py): when a sign-off opened one, and the keys of the stages that opened since
+    # the last notice. Cleared by the one run that sends it.
+    stage_opened_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    stage_opened_keys: Mapped[list | None] = mapped_column(JSON, nullable=True)
     voicent_workspace_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     # The team member who looks after this onboarding: told when it finishes or the client goes quiet.
     owner_member_id: Mapped[str | None] = mapped_column(ForeignKey("org_members.id", ondelete="SET NULL"), nullable=True, index=True)

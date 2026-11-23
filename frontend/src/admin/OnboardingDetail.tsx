@@ -255,6 +255,7 @@ export default function OnboardingDetail() {
         <Link className="btn" to={`/onboardings/${id}/preview`}>See it as the client does</Link>
       </div>
       {issued.length > 0 && <IssuedLinks links={issued} />}
+      {o.stage_notice_pending && <Banner>The client will get a message shortly saying the next stage is open (not at night where they are). Withdrawing the sign-off before then cancels it.</Banner>}
       {o.attention === 'nudges_exhausted' && <Banner kind="warn"><strong>Needs you.</strong> This client hasn't replied to the reminders, and they have stopped. A call or a message from you might help.</Banner>}
       {o.attention === 'unreachable' && <Banner kind="warn"><strong>Needs you.</strong> There's no email address or consented phone number to reach this client on, so reminders can't go out. <Link to={`/clients/${o.client_id}`}>Add one on the client page</Link>.</Banner>}
       {o.status === 'draft' && contacts.length === 0 && <Banner kind="warn">This client has no contacts yet, so there is nobody to send a link to. <Link to={`/clients/${o.client_id}`}>Add a contact</Link>.</Banner>}

@@ -58,6 +58,13 @@ describe('stages on the overview', () => {
     renderRoute(<OnboardingDetailPage />, '/onboardings/:id', '/onboardings/o1')
     expect(await screen.findByText(/Signed off by Morgan/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Withdraw sign-off' })).toBeInTheDocument()
+    expect(screen.queryByText(/get a message shortly/)).not.toBeInTheDocument()
+  })
+
+  test('the overview says when the client is about to hear a stage opened', async () => {
+    mockFetch({ ...base, 'GET /org': { body: { role: 'admin' } }, 'GET /onboardings/o1': { body: detail({ stage_notice_pending: true }) } })
+    renderRoute(<OnboardingDetailPage />, '/onboardings/:id', '/onboardings/o1')
+    expect(await screen.findByText(/get a message shortly saying the next stage is open/)).toBeInTheDocument()
   })
 
   test('a step gets its start and due day from a calendar, saved as days', async () => {

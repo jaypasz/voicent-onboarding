@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from . import models as m
-from . import branding, changes, notifications, provision, stages
+from . import branding, changes, notifications, provision, stage_notices, stages
 from .errors import Conflict, Invalid, NotFound
 from .redact import redact
 from .steps import registry
@@ -881,7 +881,12 @@ def sign_off_stage(db: Session, org_id: str, onboarding_id: str, key: str, *, me
     if st.state == "open":
         left = [s.title for s in st.steps if s.status not in stages.FINISHED]
         raise Conflict(f"Every step in “{st.title}” must be done or skipped before it can be signed off.", [f"Still open: {t}" for t in left])
+    was_locked = {x.key for x in stages.stages(ob) if x.state == "locked"}
     ob.signoffs.append(m.StageSignoff(org_id=org_id, section_key=key, member_id=member_id, signed_by=signed_by[:200], signed_at=now()))
+    db.flush()
+    opened = [x.key for x in stages.stages(ob) if x.key in was_locked and x.state != "locked"
+              and any(s.visibility == "client" and s.status not in stages.FINISHED for s in x.steps)]
+    stage_notices.note_opened(ob, opened, now())  # the client hears about it shortly (stage_notices.py)
     notifications.stage_signed_off(db, ob, st.title, member_id)
     _after_change(db, ob)
     return ob
@@ -896,6 +901,8 @@ def withdraw_signoff(db: Session, org_id: str, onboarding_id: str, key: str) -> 
     if row is None:
         raise NotFound("That stage isn't signed off.")
     ob.signoffs.remove(row)
+    db.flush()
+    stage_notices.forget_locked(ob)  # a stage locked again is no news to send
     ob.sync_version += 1
     db.flush()
     return ob

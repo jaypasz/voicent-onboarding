@@ -227,6 +227,8 @@ export interface AdminStep {
 
 export interface OnboardingDetail extends OnboardingSummary {
   stages?: AdminStage[]
+  /** A sign-off opened a stage and the client is about to be told (by text or email, never at night). */
+  stage_notice_pending?: boolean
   steps: AdminStep[]
 }
 

@@ -190,6 +190,7 @@ def onboarding_detail(ob: m.Onboarding) -> dict:
     locked = stages.locked_keys(ob)
     return onboarding_summary(ob) | {
         "stages": [stage_out(ob, st) for st in stages.stages(ob)],
+        "stage_notice_pending": ob.stage_opened_at is not None,  # the client is about to hear the next stage is open
         "steps": [step_out(ob, s, locked) for s in stages.ordered_steps(ob, list(ob.steps))],
     }
 

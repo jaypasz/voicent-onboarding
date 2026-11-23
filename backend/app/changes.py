@@ -17,6 +17,7 @@ import hashlib
 import html
 import json
 import logging
+from collections.abc import Callable
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
@@ -102,24 +103,25 @@ def build_message(contact: m.Contact, d: dict, url: str, brand: str) -> dict:
     return {"sms": sms, "subject": subject, "text": text, "html": page}
 
 
-def _tell(db: Session, settings: Settings, notifier: Notifier, ob: m.Onboarding, d: dict, now: dt.datetime) -> int:
-    """Send the notice to each contact with something to do. Returns how many were reached. A contact that can't be reached, or a send
-    that fails, is logged and not retried: a failure must not loop, and the client sees the change in their portal anyway."""
-    client = db.get(m.Client, ob.client_id)
+def tell(db: Session, settings: Settings, notifier: Notifier, ob: m.Onboarding, now: dt.datetime, *,
+         wants: Callable[[m.Contact, m.Contact | None], bool], build: Callable[[m.Contact, str, str], dict], what: str) -> int:
+    """Send one message to each contact `wants` picks, on their first working channel, with a fresh magic link. Returns how many were
+    reached. A contact that can't be reached, or a send that fails, is logged and not retried: a failure must not loop, and the client
+    sees the news in their portal anyway. Shared by the change notice and the stage-opened notice (stage_notices.py)."""
     org = db.get(m.Org, ob.org_id)
     contacts = list(db.scalars(select(m.Contact).where(m.Contact.client_id == ob.client_id, m.Contact.org_id == ob.org_id).order_by(m.Contact.created_at)))
     primary = contacts[0] if contacts else None
     reached = 0
     for c in contacts:
-        if not nudges.open_steps(ob, c, primary):
+        if not wants(c, primary):
             continue
         chans, why = nudges._channels(settings, c, False, False)
         if not chans:
-            log.info("Change notice: onboarding %s contact %s not reachable (%s)", ob.id, c.id, "; ".join(why) or "no address")
+            log.info("%s: onboarding %s contact %s not reachable (%s)", what, ob.id, c.id, "; ".join(why) or "no address")
             continue
         for channel, address in chans:
             raw, link = magic_link.issue_link(db, settings, ob.org_id, ob.id, c.id)
-            msg = build_message(c, d, f"{settings.app_url}/c/{raw}", branding.display_name(org, settings))
+            msg = build(c, f"{settings.app_url}/c/{raw}", branding.display_name(org, settings))
             if channel == "sms":
                 result = notifier.send_sms(address, msg["sms"], sender=branding.sms_from(org, settings))
             else:
@@ -131,9 +133,15 @@ def _tell(db: Session, settings: Settings, notifier: Notifier, ob: m.Onboarding,
             if result.opted_out:
                 c.sms_consent, c.sms_consent_at = False, None
                 c.sms_consent_source = f"replied STOP ({now.date().isoformat()})"
-            log.warning("Change notice: onboarding %s contact %s by %s failed: %s", ob.id, c.id, channel, result.reason)
+            log.warning("%s: onboarding %s contact %s by %s failed: %s", what, ob.id, c.id, channel, result.reason)
     db.flush()
     return reached
+
+
+def _tell(db: Session, settings: Settings, notifier: Notifier, ob: m.Onboarding, d: dict, now: dt.datetime) -> int:
+    """The change notice, to each contact with something to do."""
+    return tell(db, settings, notifier, ob, now, what="Change notice",
+                wants=lambda c, primary: bool(nudges.open_steps(ob, c, primary)), build=lambda c, url, brand: build_message(c, d, url, brand))
 
 
 def run_notices(sm: sessionmaker, settings: Settings, notifier: Notifier, now: dt.datetime | None = None) -> dict:
