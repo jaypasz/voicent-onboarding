@@ -7,7 +7,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { useId, useState } from 'react'
 import { Icon } from '../components/Icon'
 import { ConfigEditor } from './ConfigEditor'
-import { FIELD_TYPES, STEP_KINDS, byStage, kindOf, move, needsSignoff, newStep, toKey, uid, uniqueKey, isInternal, withVisibility, type FieldDoc, type FieldType, type SectionDoc, type StepDoc, type StepKind } from './doc'
+import { FIELD_TYPES, MAX_RESOURCES, STEP_KINDS, byStage, kindOf, move, needsSignoff, newStep, toKey, uid, uniqueKey, isInternal, withVisibility, type FieldDoc, type FieldType, type ResourceDoc, type SectionDoc, type StepDoc, type StepKind } from './doc'
 
 export interface BuilderValue {
   sections: SectionDoc[]
@@ -86,8 +86,34 @@ function StepEditor({ step, sections, locked, onChange }: { step: StepDoc; secti
       {!internal && <p className="help">A role picks the contact with that role, for example “owner”. Leave it blank and anyone with a link can answer.</p>}
       <h4>{kindOf(step.type)?.label ?? step.type} settings</h4>
       <ConfigEditor type={step.type} locked={locked} config={step.config} onChange={(config) => onChange({ ...step, config })} />
+      <ResourcesEditor resources={step.resources ?? []} onChange={(resources) => onChange({ ...step, resources })} />
       <p className="help">Key: <code>{step.key}</code>{locked ? ' · has answers, files or comments, so it stays and keeps its type' : ''}</p>
     </div>
+  )
+}
+
+function ResourcesEditor({ resources, onChange }: { resources: ResourceDoc[]; onChange: (r: ResourceDoc[]) => void }) {
+  const id = useId()
+  const set = (i: number, r: ResourceDoc) => onChange(resources.map((x, j) => (j === i ? r : x)))
+  return (
+    <fieldset className="resources-editor stack">
+      <legend>Links (optional)</legend>
+      <p className="help">A Loom walkthrough, a Figma file, a Drive folder, a Notion page. The client sees them with this step.</p>
+      {resources.map((r, i) => (
+        <div key={r._uid ?? i} className="row wrap resource-edit">
+          <label className="field-group grow" htmlFor={`${id}-${i}-l`}><span>Link {i + 1} name</span>
+            <input id={`${id}-${i}-l`} value={r.label ?? ''} maxLength={120} placeholder="Named by what it is" onChange={(e) => set(i, { ...r, label: e.target.value })} />
+          </label>
+          <label className="field-group grow" htmlFor={`${id}-${i}-u`}><span>Link {i + 1} address</span>
+            <input id={`${id}-${i}-u`} type="url" inputMode="url" value={r.url} maxLength={500} placeholder="https://" onChange={(e) => set(i, { ...r, url: e.target.value })} />
+          </label>
+          <button type="button" className="btn btn-small" aria-label={`Remove link ${i + 1}`} onClick={() => onChange(resources.filter((_, j) => j !== i))}>Remove</button>
+        </div>
+      ))}
+      {resources.length < MAX_RESOURCES && (
+        <button type="button" className="btn btn-small" onClick={() => onChange([...resources, { _uid: uid(), label: '', url: '' }])}>+ Add a link</button>
+      )}
+    </fieldset>
   )
 }
 

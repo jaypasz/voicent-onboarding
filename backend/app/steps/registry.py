@@ -5,7 +5,8 @@ from .base import StepType
 from .book_call import BookCall
 from .connect import Connect
 from .form import Form
-from .placeholders import CredentialShare, InfoVideo, PaymentLink
+from .info_video import InfoVideo
+from .placeholders import CredentialShare, PaymentLink
 from .task import Task
 from .upload import Upload
 

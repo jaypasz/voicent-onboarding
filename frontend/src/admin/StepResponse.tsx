@@ -58,6 +58,8 @@ export default function StepResponse({ onboardingId, step }: { onboardingId: str
       return <><p>{d.booked ? `✓ Booked${d.when ? `: ${formatDateTime(d.when)}` : ''}` : 'Not booked yet.'}</p>{who}</>
     case 'approval':
       return <><p>{d.decision === 'approved' ? '✓ Approved' : `◐ Changes requested: "${d.comment}"`}</p>{who}</>
+    case 'info_video':
+      return <><p>{d.seen ? '✓ Watched or read it' : 'Not yet.'}</p>{who}</>
     case 'task': {
       const items: string[] = step.config.checklist ?? []
       const ticked: number[] = d.checked ?? []

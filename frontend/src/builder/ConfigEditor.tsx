@@ -161,6 +161,16 @@ function BookCallConfig({ config, onChange }: Props) {
   )
 }
 
+function InfoVideoConfig({ config, onChange }: Props) {
+  return (
+    <div className="stack">
+      <Text label="Address (https://)" type="url" value={config.url} onChange={(v) => onChange({ ...config, url: v.trim() })} placeholder="https://www.loom.com/share/…"
+        help="Loom, YouTube, Vimeo, Figma, Google Docs, Sheets, Slides and Drive files are shown inside the step. Anything else (a Notion page, a PDF) is a link the client opens." />
+      <Text label="Instructions (optional)" area value={config.instructions} onChange={(v) => onChange(put(config, 'instructions', v))} />
+    </div>
+  )
+}
+
 function ConnectConfig({ config, onChange }: Props) {
   return (
     <div className="stack">
@@ -198,7 +208,7 @@ function TaskConfig({ config, onChange, locked }: Props) {
 }
 
 const EDITORS: Record<string, (p: Props) => React.JSX.Element> = {
-  form: FormConfig, upload: UploadConfig, approval: ApprovalConfig, book_call: BookCallConfig, connect: ConnectConfig, task: TaskConfig,
+  form: FormConfig, upload: UploadConfig, approval: ApprovalConfig, book_call: BookCallConfig, connect: ConnectConfig, task: TaskConfig, info_video: InfoVideoConfig,
 }
 
 export function ConfigEditor({ type, ...p }: Props & { type: string }) {

@@ -127,14 +127,14 @@ def test_task_responses():
 
 
 def test_unimplemented_types_are_known_but_unusable():
-    for name in ("credential_share", "info_video", "payment_link"):
+    for name in ("credential_share", "payment_link"):
         s = t(name)
         assert s is not None and s.implemented is False
         assert s.validate_config({}) and s.validate_response({}, {})[1]
 
 
-def test_the_registry_lists_six_working_types():
-    assert {s.type for s in registry.all_types() if s.implemented} == {"form", "upload", "connect", "book_call", "approval", "task"}
+def test_the_registry_lists_seven_working_types():
+    assert {s.type for s in registry.all_types() if s.implemented} == {"form", "upload", "connect", "book_call", "approval", "task", "info_video"}
     assert registry.get("nope") is None
 
 

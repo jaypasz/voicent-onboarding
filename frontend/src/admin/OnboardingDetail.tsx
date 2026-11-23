@@ -8,11 +8,13 @@ import { ApiError } from '../api/http'
 import type { AdminStage, AdminStep, Contact, LinkInfo, TeamMember } from '../api/types'
 import { memberLabel } from '../lib/team'
 import { Banner } from '../components/Banner'
+import { Resources } from '../components/Embed'
 import { LoadError } from '../components/LoadError'
 import { ProgressBar } from '../components/ProgressBar'
 import { StageTracker, StepTracker } from '../components/StepTracker'
 import { StepBadge } from '../components/StatusBadge'
 import { STAGE_STATE, dayRange, dueLabel, formatDate, formatDateTime, formatDay } from '../lib/format'
+import { safeHttpsUrl } from '../lib/links'
 import StepResponse from './StepResponse'
 import { IssuedLinks } from './LinksPanel'
 
@@ -161,7 +163,9 @@ function AdminStepCard({ id, step, contact, members, closed }: { id: string; ste
               </label></li>
             ))}</ul>
           )}
+          {step.media && <p className="help">Shows: {step.media.kind} · {safeHttpsUrl(step.media.href) ? <a href={safeHttpsUrl(step.media.href)!} target="_blank" rel="noopener noreferrer">open ↗</a> : step.media.href}</p>}
           {!teamTask && <StepResponse onboardingId={id} step={step} />}
+          <Resources items={step.resources} heading="Links on this step" />
           {teamTask && step.response?.data.note && <p>{step.response.data.note}</p>}
           <div className="row wrap">
             {step.status !== 'done' && teamTask && (

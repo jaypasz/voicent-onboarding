@@ -19,9 +19,5 @@ class CredentialShare(_NotYet):
     type = "credential_share"
 
 
-class InfoVideo(_NotYet):
-    type = "info_video"
-
-
 class PaymentLink(_NotYet):
     type = "payment_link"

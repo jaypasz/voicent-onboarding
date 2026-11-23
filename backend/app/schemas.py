@@ -6,7 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from . import models as m
-from . import services, stages
+from . import embeds, services, stages
 from .config import valid_timezone
 
 ClientKind = Literal["trades", "agency", "msp", "other"]
@@ -146,7 +146,8 @@ def comment_out(c: m.StepComment) -> dict:
 
 def step_out(ob: m.Onboarding, s: m.Step, locked: set[str] | None = None) -> dict:
     """The admin's view of a step: everything, internal steps included."""
-    cfg = next(d["config"] for d in ob.document["steps"] if d["key"] == s.key)
+    doc = next(d for d in ob.document["steps"] if d["key"] == s.key)
+    cfg = doc["config"]
     locked = stages.locked_keys(ob) if locked is None else locked
     tz = ob.client.timezone if ob.client else "UTC"
     last = s.responses[-1] if s.responses else None
@@ -154,6 +155,7 @@ def step_out(ob: m.Onboarding, s: m.Step, locked: set[str] | None = None) -> dic
         "id": s.id, "key": s.key, "type": s.type, "title": s.title, "section": s.section, "position": s.position,
         "visibility": s.visibility, "status": s.status, "assignee_contact_id": s.assignee_contact_id, "team_assignee_id": s.team_assignee_id,
         "due_at": s.due_at, "due_on": services.due_on(s, tz), "start_on": s.start_on, "completed_at": s.completed_at, "config": cfg,
+        "resources": embeds.resources(doc), "media": embeds.media(doc),
         "locked": s.key in locked,  # the client can't work on it until an earlier stage is signed off
         "response": {"revision": last.revision, "data": last.data, "submitted_by": last.submitted_by, "submitted_at": last.submitted_at} if last else None,
         "revisions": len(s.responses),

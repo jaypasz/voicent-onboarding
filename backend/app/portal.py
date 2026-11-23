@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
-from . import branding, magic_link, stages
+from . import branding, embeds, magic_link, stages
 from . import models as m
 from . import services
 from .config import Settings
@@ -80,6 +80,7 @@ def step_view(db: Session, ctx: Ctx, step: m.Step, locked: set[str] | None = Non
         "key": step.key, "type": step.type, "title": step.title, "description": d["description"], "section": step.section,
         "position": step.position, "status": step.status, "due_at": step.due_at, "start_on": step.start_on,
         "due_on": services.due_on(step, ob.client.timezone if ob.client else "UTC"), "config": d["config"],
+        "resources": embeds.resources(d), "media": embeds.media(d),
         "locked": step.key in locked,
         "assignee": {"id": assignee.id, "name": assignee.name, "is_you": assignee.id == contact.id} if assignee else None,
         "can_write": _can_write(ob, step, contact, locked),

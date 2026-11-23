@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ApiError } from '../api/http'
 import type { PortalStep } from '../api/types'
+import { Resources } from '../components/Embed'
 import { StepBadge } from '../components/StatusBadge'
 import { dueLabel } from '../lib/format'
 import Comments from './Comments'
@@ -46,6 +47,7 @@ export default function StepPanel({ step, onChanged, onSaved, onboardingStatus, 
         </p>
       )}
       <Renderer step={step} submit={submit} busy={busy} problems={problems} />
+      <Resources items={step.resources} />
       <Comments stepKey={step.key} comments={step.comments} canWrite={step.can_write} onChanged={onChanged} />
     </div>
   )
