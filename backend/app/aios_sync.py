@@ -4,6 +4,11 @@ Each onboarding becomes one AIOS project (its id is `onb-<onboarding id>`, so cr
 per step. Client steps read "Waiting on client: ..." until they are done; internal steps are Jay's own tasks. When a client
 acts, a one-line comment is added to the task.
 
+Stages (stages.py) go too: a step's task is titled with its stage ("[Build] ..."), a client step in a stage that isn't open
+yet doesn't say "Waiting on client" (it waits on us), and each stage that needs a sign-off gets its own task, "Sign off:
+<stage>", done once it is signed off and reopened if the sign-off is withdrawn. A stage task is found again by its link
+(`#stage-<key>`), like a step's, and closed when the stage is removed or no longer needs a sign-off.
+
 What goes out is only titles, statuses, dates and one-line summaries, passed through redact(). Never a form answer, an uploaded
 file, an account name beyond what the client typed as a label, or a link token.
 
@@ -25,6 +30,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from . import models as m
+from . import stages as stages_mod
 from .aios import AiosClient, AiosError
 from .config import Settings
 from .redact import redact
@@ -64,14 +70,41 @@ def step_link(settings: Settings, ob: m.Onboarding, step: m.Step) -> str:
     return f"{settings.app_url}/onboardings/{ob.id}#step-{step.key}"[:300]
 
 
-def task_title(step: m.Step) -> str:
-    waiting = step.visibility == "client" and step.status not in ("done", "skipped")
-    return (f"Waiting on client: {step.title}" if waiting else step.title)[:200]
+def stage_link(settings: Settings, ob: m.Onboarding, key: str) -> str:
+    return f"{settings.app_url}/onboardings/{ob.id}#stage-{key}"[:300]
 
 
-def task_notes(ob: m.Onboarding, step: m.Step, assignee: str | None) -> str:
+@dataclass
+class Place:
+    """Where a step sits: its stage's title, and the stage holding it back if it isn't open to the client yet."""
+    stage: str | None = None
+    waits_for: str | None = None
+
+
+def places(ob: m.Onboarding) -> dict[str, Place]:
+    out: dict[str, Place] = {}
+    blocker: str | None = None
+    for st in stages_mod.stages(ob):
+        for s in st.steps:
+            out[s.key] = Place(st.title, blocker if st.state == "locked" else None)
+        if blocker is None and st.signoff and st.signed is None:
+            blocker = st.title
+    return out
+
+
+def task_title(step: m.Step, place: Place | None = None) -> str:
+    place = place or Place()
+    waiting = step.visibility == "client" and step.status not in ("done", "skipped") and place.waits_for is None
+    title = f"Waiting on client: {step.title}" if waiting else step.title
+    return redact(f"[{place.stage}] {title}" if place.stage else title)[:200]
+
+
+def task_notes(ob: m.Onboarding, step: m.Step, assignee: str | None, place: Place | None = None) -> str:
+    place = place or Place()
     d = next((x for x in ob.document["steps"] if x["key"] == step.key), {})
     parts = [d.get("description", "")]
+    if place.stage:
+        parts.append(f"Stage: {place.stage}." + (f" Not open to the client yet: it waits for “{place.waits_for}” to be signed off." if place.waits_for and step.visibility == "client" else ""))
     if step.visibility == "client" and assignee:
         parts.append(f"For: {assignee}")
     checklist = (d.get("config") or {}).get("checklist") or []
@@ -80,6 +113,26 @@ def task_notes(ob: m.Onboarding, step: m.Step, assignee: str | None) -> str:
     if step.status == "skipped":
         parts.append("Skipped.")
     return redact("\n\n".join(p for p in parts if p))[:8000]
+
+
+STAGE_STATE = {
+    "locked": "Not open yet: an earlier stage hasn't been signed off.",
+    "open": "Steps are still open.",
+    "ready": "Every step is finished. Ready for an admin or a manager to sign off.",
+    "signed_off": "Signed off.",
+}
+
+
+def stage_task(settings: Settings, ob: m.Onboarding, st: stages_mod.Stage) -> dict:
+    """The sign-off task for one stage, as AIOS should have it."""
+    done = sum(1 for s in st.steps if s.status in stages_mod.FINISHED)
+    parts = [STAGE_STATE.get(st.state, ""), f"Steps finished: {done} of {len(st.steps)}."]
+    if st.signed is not None:
+        parts.append(f"Signed off by {st.signed.signed_by} on {_aware(st.signed.signed_at).date().isoformat()}.")
+    dates = [d for d in (due_date(s) for s in st.steps) if d]
+    title = f"Ready to sign off: {st.title}" if st.state == "ready" else f"Sign off: {st.title}"
+    return {"title": redact(title)[:200], "status": "done" if st.state == "signed_off" else "todo", "date": max(dates) if dates else None,
+            "notes": redact("\n\n".join(p for p in parts if p))[:8000]}
 
 
 def due_date(step: m.Step) -> str | None:
@@ -144,9 +197,12 @@ def _reconcile(db: Session, settings: Settings, aios: AiosClient, org_id: str, o
 
         # One read per pass: finds a task whose creation reply was lost, notices a renamed step, and finds tasks of removed steps.
         existing: dict[str, dict] | None = {t["link"]: t for t in aios.list_tasks(pid) if t.get("link")} if ob.aios_project_id else None
-        for s in ob.steps:
+        where = places(ob)
+        for s in stages_mod.ordered_steps(ob, list(ob.steps)):
             desired = STEP_TO_TASK[s.status]
             assignee = names.get(s.assignee_contact_id) if s.assignee_contact_id else None
+            place = where.get(s.key)
+            title, notes = task_title(s, place), task_notes(ob, s, assignee, place)
             if not s.aios_task_id:
                 if existing is None:  # one lookup per pass: finds a task whose creation reply was lost
                     existing = {t["link"]: t for t in aios.list_tasks(pid) if t.get("link")}
@@ -154,15 +210,15 @@ def _reconcile(db: Session, settings: Settings, aios: AiosClient, org_id: str, o
                 if found:
                     s.aios_task_id, s.aios_status = found["id"], found.get("status")
                 else:
-                    body = {"title": task_title(s), "status": desired, "track": "other", "priority": "normal", "project_id": pid,
-                            "date": due_date(s), "link": step_link(settings, ob, s), "notes": task_notes(ob, s, assignee)}
+                    body = {"title": title, "status": desired, "track": "other", "priority": "normal", "project_id": pid,
+                            "date": due_date(s), "link": step_link(settings, ob, s), "notes": notes}
                     s.aios_task_id, s.aios_status = aios.create_task(body)["id"], desired
                 db.commit()
                 changes += 1
             there = (existing or {}).get(step_link(settings, ob, s))
-            renamed = there is not None and (there.get("title") != task_title(s) or there.get("notes") != task_notes(ob, s, assignee))
+            renamed = there is not None and (there.get("title") != title or there.get("notes") != notes or there.get("date") != due_date(s))
             if s.aios_status != desired or renamed:
-                aios.patch_task(s.aios_task_id, {"status": desired, "title": task_title(s), "notes": task_notes(ob, s, assignee)})
+                aios.patch_task(s.aios_task_id, {"status": desired, "title": title, "notes": notes, "date": due_date(s)})
                 s.aios_status = desired
                 db.commit()
                 changes += 1
@@ -174,12 +230,35 @@ def _reconcile(db: Session, settings: Settings, aios: AiosClient, org_id: str, o
                 s.aios_comment_revision = last.revision
                 db.commit()
 
-        # A step that was removed after sending leaves its task behind: close it rather than leave "Waiting on client" forever.
+        # One sign-off task per stage that needs one. Found by its link each pass (the list above), so nothing extra is stored.
+        if existing is None:
+            existing = {t["link"]: t for t in aios.list_tasks(pid) if t.get("link")}
+        wanted_stages = set()
+        for st in stages_mod.stages(ob):
+            if not st.signoff:
+                continue
+            link = stage_link(settings, ob, st.key)
+            wanted_stages.add(link)
+            body = stage_task(settings, ob, st)
+            there = (existing or {}).get(link)
+            if there is None:
+                made = aios.create_task({**body, "track": "other", "priority": "normal", "project_id": pid, "link": link})
+                existing[link] = made
+                db.commit()
+                changes += 1
+            elif any(there.get(k) != v for k, v in body.items()):
+                aios.patch_task(there["id"], body)
+                changes += 1
+
+        # A step or stage removed after sending leaves its task behind: close it rather than leave "Waiting on client" forever.
         current = {step_link(settings, ob, s) for s in ob.steps}
         prefix = f"{settings.app_url}/onboardings/{ob.id}#step-"
-        for link, t in (existing or {}).items():
-            if link.startswith(prefix) and link not in current and t.get("status") != "done":
-                aios.patch_task(t["id"], {"status": "done", "title": f"(Removed from the onboarding) {t.get('title', '')}"[:200]})
+        stage_prefix = f"{settings.app_url}/onboardings/{ob.id}#stage-"
+        for link, t in list((existing or {}).items()):
+            gone = (link.startswith(prefix) and link not in current) or (link.startswith(stage_prefix) and link not in wanted_stages)
+            if gone and t.get("status") != "done":
+                label = "(Removed from the onboarding)" if link.startswith(prefix) else "(No longer needs a sign-off)"
+                aios.patch_task(t["id"], {"status": "done", "title": f"{label} {t.get('title', '')}"[:200]})
                 changes += 1
 
         db.execute(update(m.Onboarding).where(m.Onboarding.id == ob.id, m.Onboarding.synced_version < version).values(synced_version=version))

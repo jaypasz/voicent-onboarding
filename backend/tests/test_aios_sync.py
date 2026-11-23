@@ -363,3 +363,79 @@ def test_a_renamed_step_updates_its_task_and_a_removed_step_closes_its_task_and_
     n = len(w.aios.tasks)
     w.aios.requests.clear()
     assert sync(w, oid).changes == 0 and len(w.aios.tasks) == n and not w.aios.calls("PATCH", r".*")  # settled: nothing repeats
+
+
+# ---------------------------------------------------------------- stages
+
+FORM = {"fields": [{"key": "name", "label": "Name", "type": "text", "required": True}]}
+STAGED = {
+    "name": "Staged", "slug": "staged", "layout": "checklist",
+    "sections": [{"key": "discover", "title": "Discovery"}, {"key": "build", "title": "Build"}, {"key": "launch", "title": "Launch", "signoff": False}],
+    "steps": [
+        {"key": "about", "type": "form", "title": "About you", "section": "discover", "assignee_role": "owner", "config": FORM},
+        {"key": "assets", "type": "form", "title": "Your assets", "section": "build", "assignee_role": "owner", "config": FORM},
+        {"key": "setup", "type": "task", "title": "Set up the account", "section": "build", "config": {"audience": "team"}},
+        {"key": "golive", "type": "form", "title": "Go-live day", "section": "launch", "assignee_role": "owner", "config": FORM},
+    ],
+}
+
+
+def titles(w):
+    return {t["link"].rsplit("#", 1)[1]: t for t in w.aios.tasks.values()}
+
+
+def test_stages_name_each_task_and_each_sign_off_is_its_own_task(w):
+    _, oid, _ = w.live(doc=STAGED)
+    t = titles(w)
+    assert t["step-about"]["title"] == "[Discovery] Waiting on client: About you"
+    assert t["step-assets"]["title"] == "[Build] Your assets"  # not open to the client yet, so not waiting on them
+    assert "waits for “Discovery” to be signed off" in t["step-assets"]["notes"]
+    assert t["step-setup"]["title"] == "[Build] Set up the account" and "Not open" not in t["step-setup"]["notes"]
+    assert t["stage-discover"]["title"] == "Sign off: Discovery" and t["stage-discover"]["status"] == "todo"
+    assert t["stage-build"]["title"] == "Sign off: Build"
+    assert "stage-launch" not in t  # needs no sign-off
+    assert all(x["project_id"] == f"onb-{oid}" for x in t.values())
+    w.aios.requests.clear()
+    assert sync(w, oid).changes == 0 and not w.aios.calls("PATCH", r".*") and not w.aios.calls("POST", r".*")
+
+
+def test_a_sign_off_closes_its_task_and_opens_the_next_stage_and_withdrawing_reopens_it(w):
+    _, oid, _ = w.live(doc=STAGED)
+    w.api.post(f"/api/onboardings/{oid}/steps/about/complete")
+    assert titles(w)["stage-discover"]["title"] == "Ready to sign off: Discovery"
+    assert w.api.post(f"/api/onboardings/{oid}/stages/discover/signoff").status_code == 200
+    t = titles(w)
+    assert t["stage-discover"]["status"] == "done" and "Signed off by" in t["stage-discover"]["notes"]
+    assert t["step-assets"]["title"] == "[Build] Waiting on client: Your assets" and "Not open" not in t["step-assets"]["notes"]
+    assert w.api.delete(f"/api/onboardings/{oid}/stages/discover/signoff").status_code == 200
+    t = titles(w)
+    assert t["stage-discover"]["status"] == "todo" and t["step-assets"]["title"] == "[Build] Your assets"
+    assert len(w.aios.tasks) == 6  # nothing was made twice
+
+
+def test_a_stage_that_no_longer_needs_a_sign_off_closes_its_task(w):
+    _, oid, _ = w.live(doc=STAGED)
+    doc = w.api.get(f"/api/onboardings/{oid}/document").json()
+    sections = [{**s, "signoff": False} if s["key"] == "build" else s for s in doc["document"]["sections"]]
+    r = w.api.put(f"/api/onboardings/{oid}/document", json={"sections": sections, "steps": doc["document"]["steps"], "etag": doc["etag"]})
+    assert r.status_code == 200, r.text
+    sync(w, oid)  # a document edit is picked up by the timer's pass
+    t = titles(w)["stage-build"]
+    assert t["status"] == "done" and t["title"].startswith("(No longer needs a sign-off)")
+
+
+def test_a_lost_reply_to_creating_a_sign_off_task_is_found_by_its_link(w):
+    _, oid, _ = w.live(doc=STAGED)
+    with w.sm() as db:  # as if AIOS never told us: nothing about stage tasks is stored, so the next pass relies on the link
+        db.get(m.Onboarding, oid).sync_version += 1
+        db.commit()
+    sync(w, oid)
+    assert sum(1 for t in w.aios.tasks.values() if "#stage-" in t["link"]) == 2
+
+
+def test_a_new_due_day_reaches_the_task(w):
+    _, oid, _ = w.live(doc=STAGED)
+    r = w.api.put(f"/api/onboardings/{oid}/steps/assets/schedule", json={"start_on": None, "due_on": "2026-12-09"})
+    assert r.status_code == 200, r.text
+    t = titles(w)
+    assert t["step-assets"]["date"] == "2026-12-09" and t["stage-build"]["date"] == "2026-12-09"
