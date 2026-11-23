@@ -368,6 +368,8 @@ def test_client_cannot_change_a_step_by_resubmitting_after_completion_of_the_onb
     ob, tokens, _ = live(api, h)
     for key in ("basics", "it_access", "logo", "approve", "secret_build"):
         api.post(f"/api/onboardings/{ob['id']}/steps/{key}/complete", headers=h)
+    for stage in ("a", "z"):  # every step is finished, but it isn't over until each stage is signed off
+        assert api.post(f"/api/onboardings/{ob['id']}/stages/{stage}/signoff", headers=h).status_code == 200
     s = session(api, tokens["owner"])
     assert api.get("/api/portal/onboarding", headers=s).json()["status"] == "completed"
     assert api.put("/api/portal/steps/basics", json={"data": {"answers": {"name": "x"}}}, headers=s).status_code == 409

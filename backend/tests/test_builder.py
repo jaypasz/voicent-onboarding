@@ -17,7 +17,7 @@ def test_a_client_can_get_a_customised_copy_and_the_template_is_untouched(client
     assert [s["key"] for s in ob["steps"]] == ["approve", "logo", "basics"]
     doc = client.get(f"/api/onboardings/{ob['id']}/document").json()
     assert doc["editable"] is True and doc["locked"] == []
-    assert doc["document"]["sections"] == [{"key": "brand", "title": "Brand"}]
+    assert doc["document"]["sections"] == [{"key": "brand", "title": "Brand", "signoff": True}]  # stages need a sign-off unless told otherwise
     assert doc["document"]["slug"] == "mini" and doc["document"]["steps"][1]["visibility"] == "client"  # normalised like a template
     assert len(client.get(f"/api/templates/{t['id']}").json()["document"]["steps"]) == 3
     plain = create(client, t, cl).json()

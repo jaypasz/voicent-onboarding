@@ -19,9 +19,20 @@ export interface FieldDoc extends Meta {
   options?: string[]
 }
 
+/** A section is a stage. Unless `signoff` is false, our team signs it off before the next stage opens to the client. */
 export interface SectionDoc {
   key: string
   title: string
+  signoff?: boolean
+}
+
+export const needsSignoff = (s: SectionDoc): boolean => s.signoff !== false
+
+/** Steps regrouped so each stage's steps sit together, in stage order; steps outside a stage go last. Order inside a stage is kept. */
+export function byStage(sections: SectionDoc[], steps: StepDoc[]): StepDoc[] {
+  const rank = new Map(sections.map((s, i) => [s.key, i]))
+  const r = (s: StepDoc) => rank.get(s.section ?? '') ?? sections.length
+  return steps.map((s, i) => ({ s, i })).sort((a, b) => r(a.s) - r(b.s) || a.i - b.i).map((x) => x.s)
 }
 
 export interface StepDoc extends Meta {

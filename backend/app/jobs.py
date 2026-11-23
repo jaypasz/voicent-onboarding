@@ -12,7 +12,7 @@ import threading
 
 from sqlalchemy.orm import sessionmaker
 
-from . import aios_sync, changes, notifications, nudges, provision
+from . import aios_sync, changes, notifications, nudges, provision, stage_notices
 from .aios import AiosClient
 from .config import Settings
 from .notify import Notifier
@@ -36,6 +36,11 @@ def run_once(sm: sessionmaker, settings: Settings, notifier: Notifier | None = N
     except Exception:  # noqa: BLE001
         log.error("Change notice job failed", exc_info=True)
         out["change_notices"] = {"error": True}
+    try:
+        out["stage_notices"] = stage_notices.run_notices(sm, settings, notifier or Notifier(settings), now=now)
+    except Exception:  # noqa: BLE001
+        log.error("Stage notice job failed", exc_info=True)
+        out["stage_notices"] = {"error": True}
     try:
         out["aios"] = aios_sync.sync_dirty(sm, settings, aios)
     except Exception:  # noqa: BLE001

@@ -9,12 +9,13 @@ import datetime as dt
 import hashlib
 import json
 import re
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from . import models as m
-from . import branding, changes, notifications, provision
+from . import branding, changes, notifications, provision, stage_notices, stages
 from .errors import Conflict, Invalid, NotFound
 from .redact import redact
 from .steps import registry
@@ -593,6 +594,9 @@ def update_onboarding_steps(db: Session, org_id: str, onboarding_id: str, *, sec
         s.type, s.title, s.section, s.position, s.visibility = d["type"], d["title"], d["section"], i, d["visibility"]
         _recheck_answer(s, d["config"])
     ob.document = doc  # a new object, so the JSON column is seen as changed
+    gone = {sec["key"] for sec in doc["sections"] if not stages.needs_signoff(sec)} | ({x.section_key for x in ob.signoffs} - {sec["key"] for sec in doc["sections"]})
+    for row in [x for x in ob.signoffs if x.section_key in gone]:
+        ob.signoffs.remove(row)  # a stage that was removed, or no longer needs one, keeps no sign-off to come back with
     ob.sync_version += 1
     db.flush()
     db.expire(ob, ["steps"])  # reload in position order
@@ -607,7 +611,7 @@ def _reconcile_status(db: Session, ob: m.Onboarding) -> None:
     """After steps were added or removed: a finished onboarding that gained an open step is active again (a delivery to
     Voicent-App already made stays made; provision.queue never sends twice), and an active one with nothing left to do is finished.
     Editing is not client activity, so the quiet-client timer is left alone."""
-    if ob.status == "completed" and any(s.status not in ("done", "skipped") for s in ob.steps):
+    if ob.status == "completed" and (any(s.status not in ("done", "skipped") for s in ob.steps) or not stages.all_signed_off(ob)):
         ob.status, ob.completed_at = "active", None
     else:
         _complete_if_finished(db, ob)
@@ -627,7 +631,8 @@ def _recheck_answer(step: m.Step, config: dict) -> None:
 
 
 def send_onboarding(db: Session, org_id: str, onboarding_id: str) -> m.Onboarding:
-    """Start the onboarding. Due dates count from now, because the template's offsets are relative to kickoff."""
+    """Start the onboarding. Due dates count from now, because the template's offsets are relative to kickoff, except where
+    a date was already picked on the draft."""
     ob = _onboarding(db, org_id, onboarding_id)
     if ob.status != "draft":
         raise Conflict(f"Only a draft can be sent; this one is {ob.status}.")
@@ -635,7 +640,8 @@ def send_onboarding(db: Session, org_id: str, onboarding_id: str) -> m.Onboardin
     offsets = {s["key"]: s["due_offset_days"] for s in ob.document["steps"]}
     for step in ob.steps:
         days = offsets.get(step.key)
-        step.due_at = start + dt.timedelta(days=days) if days is not None else None
+        if step.due_at is None and days is not None:  # a date picked on the draft stays; the rest count from now
+            step.due_at = start + dt.timedelta(days=days)
     ob.status, ob.started_at, ob.last_activity_at = "active", start, start
     ob.sync_version += 1
     db.flush()
@@ -701,6 +707,8 @@ def submit_step(db: Session, org_id: str, onboarding_id: str, key: str, data, *,
     ob, step = _step(db, org_id, onboarding_id, key)
     if actor_kind == "client" and (ob.status != "active" or step.visibility != "client"):
         raise Conflict("This step can't be changed right now.")
+    if actor_kind == "client" and step.key in stages.locked_keys(ob):
+        raise Conflict("This step opens once the part before it has been signed off.")
     if ob.status in ("completed", "archived"):
         raise Conflict(f"This onboarding is {ob.status}.")
     stype = registry.get(step.type)
@@ -798,18 +806,106 @@ def _set_step_status(ob: m.Onboarding, step: m.Step, status: str) -> None:
 def _after_change(db: Session, ob: m.Onboarding) -> None:
     ob.last_activity_at = now()
     ob.sync_version += 1  # AIOS needs to hear about this
+    db.flush()
+    for st in stages.stages(ob):
+        if st.state == "ready":
+            notifications.stage_ready(db, ob, st.key, st.title)
     _complete_if_finished(db, ob)
     db.flush()
 
 
 def _complete_if_finished(db: Session, ob: m.Onboarding) -> None:
-    if ob.status == "active" and ob.steps and all(s.status in ("done", "skipped") for s in ob.steps):
+    if ob.status == "active" and ob.steps and all(s.status in ("done", "skipped") for s in ob.steps) and stages.all_signed_off(ob):
         ob.status, ob.completed_at = "completed", now()
         if ob.client_id:  # wait for, then re-read, a payment being marked at this moment (see set_client_paying)
             db.scalar(select(m.Client).where(m.Client.id == ob.client_id).with_for_update().execution_options(populate_existing=True))
         provision.queue(ob, ob.completed_at)  # sent after the response by provision.kick, or by the timer
         notifications.onboarding_completed(db, ob)
     db.flush()
+
+
+# ---------------------------------------------------------------- schedule
+
+def end_of_day(day: dt.date, tz_name: str) -> dt.datetime:
+    """The last minute of a calendar day where the client is: a step due on the 3rd isn't overdue until the 3rd is over for them."""
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:  # an unknown zone name: fall back to UTC rather than refuse the date
+        tz = dt.timezone.utc
+    return dt.datetime.combine(day, dt.time(23, 59), tzinfo=tz).astimezone(dt.timezone.utc)
+
+
+def due_on(step: m.Step, tz_name: str) -> dt.date | None:
+    """The calendar day a step is due, where the client is."""
+    if step.due_at is None:
+        return None
+    at = step.due_at if step.due_at.tzinfo else step.due_at.replace(tzinfo=dt.timezone.utc)
+    try:
+        return at.astimezone(ZoneInfo(tz_name)).date()
+    except Exception:
+        return at.astimezone(dt.timezone.utc).date()
+
+
+def set_step_schedule(db: Session, org_id: str, onboarding_id: str, key: str, *, start_on: dt.date | None, due: dt.date | None) -> m.Step:
+    """Pick the day work on a step starts and the day it is due. Either may be cleared. Works on a draft too: sending keeps it."""
+    ob, step = _step(db, org_id, onboarding_id, key)
+    if ob.status == "archived":
+        raise Conflict("This onboarding is archived.")
+    if start_on and due and start_on > due:
+        raise Invalid("The start date is after the due date.", ["Start: pick a day on or before the due date."])
+    tz = ob.client.timezone if ob.client else "UTC"
+    step.start_on = start_on
+    step.due_at = end_of_day(due, tz) if due else None
+    ob.sync_version += 1  # the due date goes to AIOS
+    db.flush()
+    return step
+
+
+# ---------------------------------------------------------------- stage sign-off
+
+def sign_off_stage(db: Session, org_id: str, onboarding_id: str, key: str, *, member_id: str | None, signed_by: str) -> m.Onboarding:
+    """Our team says a stage is finished, which opens the next one to the client. Possible once every step in it is done or
+    skipped and the stages before it are signed off. Signing off the last stage finishes the onboarding."""
+    ob = _onboarding(db, org_id, onboarding_id)
+    if ob.status not in ("active", "paused"):
+        raise Conflict("Send this onboarding first." if ob.status == "draft" else f"This onboarding is {ob.status}.")
+    st = stages.find(ob, key)
+    if st is None:
+        raise NotFound("Stage not found.")
+    if not st.signoff:
+        raise Conflict(f"“{st.title}” doesn't need a sign-off.")
+    if st.state == "signed_off":
+        raise Conflict(f"“{st.title}” is already signed off.")
+    if st.state == "locked":
+        raise Conflict(f"Sign off the stages before “{st.title}” first.")
+    if st.state == "open":
+        left = [s.title for s in st.steps if s.status not in stages.FINISHED]
+        raise Conflict(f"Every step in “{st.title}” must be done or skipped before it can be signed off.", [f"Still open: {t}" for t in left])
+    was_locked = {x.key for x in stages.stages(ob) if x.state == "locked"}
+    ob.signoffs.append(m.StageSignoff(org_id=org_id, section_key=key, member_id=member_id, signed_by=signed_by[:200], signed_at=now()))
+    db.flush()
+    opened = [x.key for x in stages.stages(ob) if x.key in was_locked and x.state != "locked"
+              and any(s.visibility == "client" and s.status not in stages.FINISHED for s in x.steps)]
+    stage_notices.note_opened(ob, opened, now())  # the client hears about it shortly (stage_notices.py)
+    notifications.stage_signed_off(db, ob, st.title, member_id)
+    _after_change(db, ob)
+    return ob
+
+
+def withdraw_signoff(db: Session, org_id: str, onboarding_id: str, key: str) -> m.Onboarding:
+    """Take a sign-off back: the stages after it lock again for the client (their answers stay). Not once the onboarding is finished."""
+    ob = _onboarding(db, org_id, onboarding_id)
+    if ob.status in ("completed", "archived"):
+        raise Conflict(f"This onboarding is {ob.status}. Reopen a step first to change its stages.")
+    row = next((x for x in ob.signoffs if x.section_key == key), None)
+    if row is None:
+        raise NotFound("That stage isn't signed off.")
+    ob.signoffs.remove(row)
+    db.flush()
+    stage_notices.forget_locked(ob)  # a stage locked again is no news to send
+    ob.sync_version += 1
+    db.flush()
+    return ob
 
 
 def add_comment(db: Session, org_id: str, onboarding_id: str, key: str, *, body: str, author_kind: str, author_label: str, client_visible: bool = True) -> m.StepComment:

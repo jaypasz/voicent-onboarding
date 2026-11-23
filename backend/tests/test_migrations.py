@@ -1,4 +1,5 @@
 """The migrations have to build exactly the schema the models describe, or production drifts from the tests."""
+import json
 import os
 from pathlib import Path
 
@@ -97,3 +98,27 @@ def test_upgrading_a_database_that_already_has_data_keeps_it_and_fills_in_the_ne
     assert step.aios_status is None and step.aios_comment_revision == 0
     command.downgrade(cfg(), "0002")  # and it can be undone
     command.upgrade(cfg(), "head")
+
+
+def test_onboardings_already_sent_keep_their_sections_open_when_stages_arrive(tmp_path, monkeypatch):
+    """0011: a sent onboarding's sections are marked as not needing a sign-off, so nobody is locked out mid-way. A draft is left
+    alone, so it gets sign-offs like any new one."""
+    url = f"sqlite:///{tmp_path / 'stages.db'}"
+    monkeypatch.setenv("DATABASE_URL", url)
+    command.upgrade(cfg(), "0010")
+    engine = make_engine(url)
+    doc = json.dumps({"name": "X", "sections": [{"key": "a", "title": "A"}, {"key": "b", "title": "B", "signoff": True}], "steps": []})
+    with engine.begin() as conn:
+        t = "2026-11-06 12:00:00"
+        conn.execute(text(f"insert into orgs (id, name, slug, created_at, updated_at) values ('o1', 'V', 'v', '{t}', '{t}')"))
+        conn.execute(text(f"insert into clients (id, org_id, name, kind, status, notes, timezone, created_at, updated_at) values ('c1', 'o1', 'Acme', 'trades', 'active', '', 'UTC', '{t}', '{t}')"))
+        for oid, status in (("sent", "active"), ("draft", "draft")):
+            conn.execute(text(
+                "insert into onboardings (id, org_id, client_id, title, layout, status, document, last_activity_at, nudges_paused, created_at, updated_at) "
+                f"values (:id, 'o1', 'c1', 'K', 'focus', :status, :doc, '{t}', 0, '{t}', '{t}')"), {"id": oid, "status": status, "doc": doc})
+    command.upgrade(cfg(), "head")
+    with engine.connect() as conn:
+        docs = {r.id: json.loads(r.document) if isinstance(r.document, str) else r.document
+                for r in conn.execute(text("select id, document from onboardings"))}
+    assert [s["signoff"] for s in docs["sent"]["sections"]] == [False, True]  # one already set stays as it was
+    assert [s.get("signoff") for s in docs["draft"]["sections"]] == [None, True]

@@ -52,6 +52,8 @@ def normalise(doc: dict) -> dict:
     out.setdefault("sections", [])
     out.setdefault("nudge_after_days", 3)
     out.setdefault("on_complete", "none")
+    for section in out["sections"]:
+        section.setdefault("signoff", True)
     for step in out["steps"]:
         stype = registry.get(step["type"])
         step.setdefault("description", "")

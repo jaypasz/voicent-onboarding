@@ -202,12 +202,17 @@ class Onboarding(Stamped, Base):
     # client's steps looked like before the first of them (title and fingerprint per client-visible step).
     steps_changed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     client_seen_steps: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Telling the client a stage opened (stage_notices.py): when a sign-off opened one, and the keys of the stages that opened since
+    # the last notice. Cleared by the one run that sends it.
+    stage_opened_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    stage_opened_keys: Mapped[list | None] = mapped_column(JSON, nullable=True)
     voicent_workspace_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     # The team member who looks after this onboarding: told when it finishes or the client goes quiet.
     owner_member_id: Mapped[str | None] = mapped_column(ForeignKey("org_members.id", ondelete="SET NULL"), nullable=True, index=True)
 
     client: Mapped[Client] = relationship(back_populates="onboardings")
     steps: Mapped[list["Step"]] = relationship(back_populates="onboarding", cascade="all, delete-orphan", order_by="Step.position")
+    signoffs: Mapped[list["StageSignoff"]] = relationship(cascade="all, delete-orphan", order_by="StageSignoff.signed_at")
 
 
 class Step(Stamped, Base):
@@ -229,6 +234,8 @@ class Step(Stamped, Base):
     # Who on our side follows this step up (the contact above is who answers it on the client's side). Never shown to clients.
     team_assignee_id: Mapped[str | None] = mapped_column(ForeignKey("org_members.id", ondelete="SET NULL"), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="pending")  # pending | in_progress | done | skipped
+    # When work on it is planned to begin, as a calendar day (the schedule). The due date is due_at, the end of a day for the client.
+    start_on: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     due_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     aios_task_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
@@ -239,6 +246,21 @@ class Step(Stamped, Base):
     responses: Mapped[list["Response"]] = relationship(back_populates="step", cascade="all, delete-orphan", order_by="Response.revision")
     files: Mapped[list["File"]] = relationship(back_populates="step", cascade="all, delete-orphan")
     comments: Mapped[list["StepComment"]] = relationship(back_populates="step", cascade="all, delete-orphan", order_by="StepComment.created_at")
+
+
+class StageSignoff(Stamped, Base):
+    """Our team signed off one stage (a section of the onboarding) as finished, which opens the next one to the client (stages.py).
+    Withdrawing it deletes the row."""
+
+    __tablename__ = "stage_signoffs"
+    __table_args__ = (UniqueConstraint("onboarding_id", "section_key"),)
+
+    org_id: Mapped[str] = org_fk()
+    onboarding_id: Mapped[str] = mapped_column(ForeignKey("onboardings.id", ondelete="CASCADE"), index=True)
+    section_key: Mapped[str] = mapped_column(String(80))
+    member_id: Mapped[str | None] = mapped_column(ForeignKey("org_members.id", ondelete="SET NULL"), nullable=True)
+    signed_by: Mapped[str] = mapped_column(String(200), default="")  # a name or email, for showing who did it after they leave
+    signed_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
 class Response(Stamped, Base):
@@ -340,7 +362,7 @@ class Notification(Stamped, Base):
 
     org_id: Mapped[str] = org_fk()
     member_id: Mapped[str] = mapped_column(ForeignKey("org_members.id", ondelete="CASCADE"))
-    kind: Mapped[str] = mapped_column(String(40))  # assigned_onboarding | assigned_step | step_done | completed | quiet
+    kind: Mapped[str] = mapped_column(String(40))  # assigned_onboarding | assigned_step | step_done | completed | quiet | stage_ready | stage_signed_off
     onboarding_id: Mapped[str | None] = mapped_column(ForeignKey("onboardings.id", ondelete="CASCADE"), nullable=True, index=True)
     step_key: Mapped[str] = mapped_column(String(80), default="")
     text: Mapped[str] = mapped_column(String(300))

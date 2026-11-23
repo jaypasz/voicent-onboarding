@@ -12,7 +12,7 @@ export default function StepPanel({ step, onChanged, onSaved, onboardingStatus, 
   const [busy, setBusy] = useState(false)
   const [problems, setProblems] = useState<string[]>([])
   const Renderer = rendererFor(step.type)
-  const due = dueLabel(step.due_at, step.status)
+  const due = dueLabel(step.due_at, step.status, undefined, step.due_on)
 
   async function submit(data: unknown) {
     setBusy(true)
@@ -42,7 +42,7 @@ export default function StepPanel({ step, onChanged, onSaved, onboardingStatus, 
       {step.description && <p>{step.description}</p>}
       {!step.can_write && (
         <p className="help" role="note">
-          {onboardingStatus !== 'active' ? 'Changes are switched off for now.' : notYours ? `This step is for ${step.assignee!.name}. You can read it here.` : 'You can read this step here.'}
+          {step.locked ? 'This opens once we have reviewed the part before it. You can read it now.' : onboardingStatus !== 'active' ? 'Changes are switched off for now.' : notYours ? `This step is for ${step.assignee!.name}. You can read it here.` : 'You can read this step here.'}
         </p>
       )}
       <Renderer step={step} submit={submit} busy={busy} problems={problems} />

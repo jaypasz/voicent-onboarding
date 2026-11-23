@@ -97,6 +97,10 @@ input[type='checkbox'], input[type='radio'] { width: 22px; height: 22px; vertica
 .tracker-next .tracker-node { outline: 3px solid var(--accent); outline-offset: 1px; }
 .tracker-next { color: var(--text); font-weight: 600; }
 .tracker-title { overflow-wrap: anywhere; }
+.tracker-stages .tracker-step { flex-basis: 140px; min-width: 140px; }
+.tracker-detail { font-size: 0.75rem; color: var(--muted); font-weight: 400; }
+.tracker-ready .tracker-node { border-color: var(--accent); color: var(--accent); }
+.tracker-locked .tracker-node { border-style: dashed; font-size: 0.85rem; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .due { font-size: 0.85rem; color: var(--muted); }
 .due-overdue { color: var(--err); font-weight: 600; }
@@ -232,8 +236,15 @@ input[type='checkbox'], input[type='radio'] { width: 22px; height: 22px; vertica
 .field-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.6rem; }
 .field-row { display: flex; flex-direction: column; gap: 0.6rem; padding: 0.75rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
 .check-chip { padding: 0 0.75rem; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); }
-.sections-panel summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; gap: 0.4rem; }
-.sections-panel[open] { display: flex; flex-direction: column; gap: 0.75rem; }
+/* ---- stages in the builder: each a card holding its steps */
+.stage-block { display: flex; flex-direction: column; gap: 0.6rem; padding: 0.75rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
+.stage-none { border-style: dashed; }
+.stage-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; }
+.stage-head > .field-group { min-width: 10rem; }
+.stage-number { flex: none; width: 32px; height: 32px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; background: var(--accent); color: var(--accent-text, #fff); }
+.stage-title { font-weight: 600; font-size: 1.05rem; }
+.stage-signoff { flex-basis: 100%; min-height: 44px; }
+.add-stage { align-items: flex-end; }
 .step-preview .card { padding: 0.5rem 0.9rem; }
 .save-bar { position: sticky; bottom: 0; z-index: 5; padding: 0.75rem 0; background: var(--bg); border-top: 1px solid var(--line); }
 @media (prefers-reduced-motion: reduce) { .step-item { transition: none !important; } }
@@ -266,3 +277,16 @@ input[type='checkbox'], input[type='radio'] { width: 22px; height: 22px; vertica
 .task-done strong { text-decoration: line-through; color: var(--muted); }
 
 .checklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+
+/* ---- stages on the onboarding overview */
+.stage-section { padding-top: 0.5rem; border-top: 1px solid var(--line); }
+.stage-summary { display: flex; flex-direction: column; gap: 0.4rem; }
+.stage-summary h2 { display: flex; align-items: center; gap: 0.5rem; margin: 0; }
+.stage-meta { gap: 0.4rem 0.75rem; }
+.stage-ready { border-color: var(--accent); color: var(--accent); }
+.stage-signed_off, .stage-done { border-color: var(--ok); color: var(--ok); }
+.stage-section-locked .steps { opacity: 0.85; }
+.schedule { border: 1px solid var(--line); border-radius: var(--radius); padding: 0.5rem 0.75rem; margin: 0; }
+.schedule legend { font-weight: 600; padding: 0 0.25rem; }
+.schedule input[type="date"] { min-height: 44px; }
+.section > .badge { align-self: flex-start; margin: 0; }

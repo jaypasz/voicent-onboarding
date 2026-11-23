@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
-from . import branding, magic_link
+from . import branding, magic_link, stages
 from . import models as m
 from . import services
 from .config import Settings
@@ -61,24 +61,28 @@ def _visible(ob: m.Onboarding, step: m.Step, contact: m.Contact) -> bool:
     return True
 
 
-def _can_write(ob: m.Onboarding, step: m.Step, contact: m.Contact) -> bool:
-    return ob.status == "active" and step.visibility == "client" and step.assignee_contact_id in (None, contact.id)
+def _can_write(ob: m.Onboarding, step: m.Step, contact: m.Contact, locked: set[str] | None = None) -> bool:
+    locked = stages.locked_keys(ob) if locked is None else locked
+    return ob.status == "active" and step.visibility == "client" and step.assignee_contact_id in (None, contact.id) and step.key not in locked
 
 
 def _doc_step(ob: m.Onboarding, key: str) -> dict:
     return next(d for d in ob.document["steps"] if d["key"] == key)
 
 
-def step_view(db: Session, ctx: Ctx, step: m.Step) -> dict:
+def step_view(db: Session, ctx: Ctx, step: m.Step, locked: set[str] | None = None) -> dict:
     ob, contact = ctx.onboarding, ctx.contact
+    locked = stages.locked_keys(ob) if locked is None else locked
     d = _doc_step(ob, step.key)
     last = step.responses[-1] if step.responses else None
     assignee = db.get(m.Contact, step.assignee_contact_id) if step.assignee_contact_id else None
     return {
         "key": step.key, "type": step.type, "title": step.title, "description": d["description"], "section": step.section,
-        "position": step.position, "status": step.status, "due_at": step.due_at, "config": d["config"],
+        "position": step.position, "status": step.status, "due_at": step.due_at, "start_on": step.start_on,
+        "due_on": services.due_on(step, ob.client.timezone if ob.client else "UTC"), "config": d["config"],
+        "locked": step.key in locked,
         "assignee": {"id": assignee.id, "name": assignee.name, "is_you": assignee.id == contact.id} if assignee else None,
-        "can_write": _can_write(ob, step, contact),
+        "can_write": _can_write(ob, step, contact, locked),
         "response": last.data if last else None,
         "files": [{"id": f.id, "name": f.name, "size": f.size} for f in step.files],
         "comments": [
@@ -88,18 +92,36 @@ def step_view(db: Session, ctx: Ctx, step: m.Step) -> dict:
     }
 
 
+def _stage_view(st: stages.Stage, visible: list[m.Step]) -> dict:
+    """A stage as the client sees it. Its state is worked out from their own steps only, so it never hints at internal ones:
+    when everything they can see is finished but we haven't signed it off yet, it is "waiting" (on us)."""
+    mine = [s for s in visible if s.section == st.key]
+    finished = all(s.status in stages.FINISHED for s in mine)
+    if st.state == "locked":
+        state = "locked"
+    elif st.state == "signed_off":
+        state = "signed_off"
+    elif not finished:
+        state = "open"
+    else:
+        state = "waiting" if st.signoff else "done"
+    return {"key": st.key, "title": st.title, "signoff": st.signoff, "state": state}
+
+
 def onboarding_view(db: Session, ctx: Ctx, settings: Settings) -> dict:
     ob, contact = ctx.onboarding, ctx.contact
-    steps = [s for s in ob.steps if _visible(ob, s, contact)]
+    steps = stages.ordered_steps(ob, [s for s in ob.steps if _visible(ob, s, contact)])
+    locked = stages.locked_keys(ob)
     live = [s for s in steps if s.status != "skipped"]
     used = {s.section for s in steps if s.section}
     client = db.get(m.Client, ob.client_id)
     return {
         "title": ob.title, "layout": ob.layout, "status": ob.status, "client_name": client.name if client else "",
         "contact": {"id": contact.id, "name": contact.name},
-        "sections": [sec for sec in ob.document["sections"] if sec["key"] in used],
+        "sections": [{"key": sec["key"], "title": sec["title"]} for sec in ob.document["sections"] if sec["key"] in used],
+        "stages": [_stage_view(st, steps) for st in stages.stages(ob) if st.key in used],
         "progress": {"done": sum(1 for s in live if s.status == "done"), "total": len(live)},
-        "steps": [step_view(db, ctx, s) for s in steps],
+        "steps": [step_view(db, ctx, s, locked) for s in steps],
         "brand": branding.public(db.get(m.Org, ob.org_id), settings),  # whose portal this is: never "Voicent" for a reseller's client
     }
 
@@ -126,6 +148,8 @@ def _find(ctx: Ctx, key: str) -> m.Step:
 def _writable(ctx: Ctx, step: m.Step) -> None:
     if ctx.onboarding.status != "active":
         raise Conflict("This onboarding isn't accepting changes right now.")
+    if step.key in stages.locked_keys(ctx.onboarding):
+        raise Conflict("This step opens once the part before it has been signed off.")
     if not _can_write(ctx.onboarding, step, ctx.contact):
         raise Forbidden("This step is assigned to someone else.")
 
