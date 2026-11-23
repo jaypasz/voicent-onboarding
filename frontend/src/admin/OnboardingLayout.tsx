@@ -17,6 +17,7 @@ export default function OnboardingLayout() {
     { to: `/onboardings/${id}/steps`, label: o.status === 'draft' ? 'Edit steps' : 'Steps' },
     { to: `/onboardings/${id}/preview`, label: 'Client preview' },
     { to: `/onboardings/${id}/follow-up`, label: 'Links & follow-up' },
+    { to: `/onboardings/${id}/activity`, label: 'Activity' },
   ]
   return (
     <div className="stack">

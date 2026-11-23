@@ -31,6 +31,17 @@ READS = {"GET", "HEAD", "OPTIONS"}
 
 
 def _resolve_org(request: Request, actor: Actor, db: Session, viewers_may_write: bool) -> str:
+    """The org this admin request acts for, and who is acting, for the audit trail (audit.py)."""
+    from . import audit
+
+    org = _which_org(request, actor, db, viewers_may_write)
+    member = db.get(m.OrgMember, request.state.member_id) if request.state.member_id else None
+    label = (member.name or member.email) if member and (member.name or member.email) else actor.label
+    audit.acting(db, audit.Who("team", request.state.member_id or actor.id, label if actor.kind != "service" else f"{label} (service)"))
+    return org
+
+
+def _which_org(request: Request, actor: Actor, db: Session, viewers_may_write: bool) -> str:
     """The org this admin request acts for. A person acts for the orgs they belong to; nobody reaches another org's rows.
 
     - user: their memberships (copied from Voicent-App when tenancy is on, see tenancy.py, plus any made by seed). With
@@ -115,6 +126,9 @@ def portal_ctx(request: Request, db: Session = Depends(get_db, scope="function")
     ctx = portal.build_ctx(db, request.app.state.settings, token) if token else None
     if ctx is None:
         raise HTTPException(401, portal.UNAVAILABLE, headers={"WWW-Authenticate": "Bearer"})
+    from . import audit
+
+    audit.acting(db, audit.Who("client", ctx.contact.id, ctx.contact.name))
     return ctx
 
 

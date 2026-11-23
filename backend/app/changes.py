@@ -22,7 +22,7 @@ from collections.abc import Callable
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from . import branding, magic_link, nudges
+from . import audit, branding, magic_link, nudges
 from . import models as m
 from .config import Settings
 from .notify import Notifier
@@ -114,6 +114,8 @@ def tell(db: Session, settings: Settings, notifier: Notifier, ob: m.Onboarding, 
     contacts = list(db.scalars(select(m.Contact).where(m.Contact.client_id == ob.client_id, m.Contact.org_id == ob.org_id).order_by(m.Contact.created_at)))
     primary = contacts[0] if contacts else None
     reached = 0
+    key = "change_notice" if what == "Change notice" else "stage_notice"
+    news = "the message about their changed steps" if key == "change_notice" else "the message that the next stage is open"
     for c in contacts:
         if not wants(c, primary):
             continue
@@ -128,13 +130,20 @@ def tell(db: Session, settings: Settings, notifier: Notifier, ob: m.Onboarding, 
                 result = notifier.send_sms(address, msg["sms"], sender=branding.sms_from(org, settings))
             else:
                 result = notifier.send_email(address, msg["subject"], msg["text"], msg["html"], sender=branding.email_from(org, settings), reply_to=branding.reply_to(org))
+            by, word = audit.system(what + "s"), nudges.CHANNEL_WORDS[channel]
             if result.ok:
                 reached += 1
+                audit.record(db, ob.org_id, f"{key}.sent", f"Sent {c.name} {news} by {word}.", onboarding=ob, by=by, at=now,
+                             details={"contact_id": c.id, "channel": channel})
                 break
             link.revoked_at = now  # nobody received this link
+            audit.record(db, ob.org_id, f"{key}.failed", f"Couldn't send {c.name} {news} by {word}; its link was cancelled.",
+                         onboarding=ob, by=by, at=now, details={"contact_id": c.id, "channel": channel})
             if result.opted_out:
                 c.sms_consent, c.sms_consent_at = False, None
                 c.sms_consent_source = f"replied STOP ({now.date().isoformat()})"
+                audit.record(db, ob.org_id, "contact.sms_consent_withdrawn", f"{c.name} replied STOP, so they get no more texts.", onboarding=ob,
+                             by=audit.system("Twilio"), at=now, details={"contact_id": c.id})
             log.warning("%s: onboarding %s contact %s by %s failed: %s", what, ob.id, c.id, channel, result.reason)
     db.flush()
     return reached

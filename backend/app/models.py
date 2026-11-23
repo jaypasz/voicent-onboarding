@@ -371,6 +371,31 @@ class Notification(Stamped, Base):
     email_state: Mapped[str] = mapped_column(String(20), default="none", server_default="none")
 
 
+class AuditEvent(Stamped, Base):
+    """One change, by whom and when: the audit trail. Written by `audit.record` in the same transaction as the change, so a
+    change and its entry are saved together or not at all. Never changed or deleted by the app (`audit` refuses both). The
+    summary is our own wording with titles and names; it never carries an answer, a comment's text, a file's contents or a
+    link token."""
+
+    __tablename__ = "audit_events"
+    __table_args__ = (
+        Index("ix_audit_events_onboarding_at", "onboarding_id", "at"),
+        Index("ix_audit_events_client_at", "client_id", "at"),
+    )
+
+    org_id: Mapped[str] = org_fk()
+    at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+    actor_kind: Mapped[str] = mapped_column(String(20))  # team | client | system
+    actor_id: Mapped[str | None] = mapped_column(String(64), nullable=True)  # org member, contact, or service token id
+    actor_label: Mapped[str] = mapped_column(String(200))  # the name at the time, so the trail reads the same later
+    action: Mapped[str] = mapped_column(String(60))  # e.g. step.answered, stage.signed_off, reminder.sent
+    onboarding_id: Mapped[str | None] = mapped_column(ForeignKey("onboardings.id", ondelete="CASCADE"), nullable=True)
+    client_id: Mapped[str | None] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), nullable=True)
+    step_key: Mapped[str] = mapped_column(String(80), default="")
+    summary: Mapped[str] = mapped_column(String(500))
+    details: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
 class Task(Stamped, Base):
     """A standalone to-do for the team about a client ("chase the invoice"). Ours alone: never shown to a client, never sent to
     Voicent-App or the AIOS board. Work that belongs to an onboarding is a team `task` step in its flow instead."""

@@ -408,3 +408,16 @@ export interface AppNotification {
   read: boolean
   created_at: string
 }
+
+/** One entry of an onboarding's audit trail: who changed what, and when. Our own wording; never what a client typed. */
+export interface AuditEntry {
+  id: string
+  at: string
+  actor_kind: 'team' | 'client' | 'system'
+  actor_label: string
+  action: string
+  step_key: string
+  summary: string
+  /** A change to the client (a contact, being marked paying) rather than to this onboarding. */
+  about_client: boolean
+}

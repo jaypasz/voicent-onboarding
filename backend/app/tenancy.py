@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from . import audit
 from . import models as m
 from .voicent_directory import DirectoryError, Person, Tenant
 
@@ -61,13 +62,20 @@ def sync_person(db: Session, auth_id: str, email: str, person: Person | None) ->
         row = db.scalar(select(m.OrgMember).where(m.OrgMember.org_id == org.id, m.OrgMember.auth_user_id == auth_id))
         if row is None:
             db.add(m.OrgMember(org_id=org.id, auth_user_id=auth_id, email=email[:200], role=person.role, source="voicent"))
+            _audit(db, org.id, "team.joined", f"{email or 'Someone'} joined the team as {person.role}, as Voicent-App says.")
         elif row.source == "voicent":
+            if row.role != person.role:
+                _audit(db, org.id, "team.role_changed", f"{row.name or row.email}'s role changed from {row.role} to {person.role}, as Voicent-App says.")
             row.role, row.email = person.role, email[:200]
     q = delete(m.OrgMember).where(m.OrgMember.auth_user_id == auth_id, m.OrgMember.source == "voicent")
     if keep_org:
         q = q.where(m.OrgMember.org_id != keep_org)
     db.execute(q)
     db.flush()
+
+
+def _audit(db: Session, org_id: str, action: str, text: str, who=None) -> None:
+    audit.record(db, org_id, action, text, by=who or audit.system("Voicent-App"))
 
 
 def sync_team(db: Session, directory, org: m.Org) -> bool:
@@ -90,12 +98,16 @@ def sync_team(db: Session, directory, org: m.Org) -> bool:
         row = rows.get(p.auth_id)
         if row is None:
             db.add(m.OrgMember(org_id=org.id, auth_user_id=p.auth_id, email=p.email, role=p.role, source="voicent"))
+            _audit(db, org.id, "team.joined", f"{p.email or 'Someone'} joined the team as {p.role}, as Voicent-App says.")
         elif row.source == "voicent":
+            if row.role != p.role:
+                _audit(db, org.id, "team.role_changed", f"{row.name or row.email}'s role changed from {row.role} to {p.role}, as Voicent-App says.")
             row.role = p.role
             if p.email:
                 row.email = p.email
     for aid, row in rows.items():
         if row.source == "voicent" and aid not in listed:
+            _audit(db, org.id, "team.removed", f"{row.name or row.email or 'Someone'} left the team, as Voicent-App says.")
             db.delete(row)
     db.flush()
     return True
@@ -111,6 +123,7 @@ def accept_invites(db: Session, auth_id: str, email: str, now) -> None:
         exists = db.scalar(select(m.OrgMember.id).where(m.OrgMember.org_id == inv.org_id, m.OrgMember.auth_user_id == auth_id))
         if not exists:
             db.add(m.OrgMember(org_id=inv.org_id, auth_user_id=auth_id, email=email[:200], role=inv.role if inv.role in RANK else "member", source="local"))
+            _audit(db, inv.org_id, "team.joined", f"{email} accepted the invite and joined as {inv.role}.", who=audit.Who("team", auth_id, email))
         inv.accepted_at = now
     if invites:
         db.flush()

@@ -253,6 +253,10 @@ class DeliveryResult:
 
 def _log(db: Session, ob: m.Onboarding, status: str, detail: str) -> None:
     db.add(m.SyncLog(org_id=ob.org_id, onboarding_id=ob.id, target="voicent", action="provision", status=status, detail=detail[:300]))
+    from . import audit  # our own wording with a status code, never Voicent-App's text
+
+    audit.record(db, ob.org_id, "voicent.delivered" if status == "ok" else "voicent.failed", f"Workspace request: {detail}", onboarding=ob,
+                 by=audit.system("Voicent-App delivery"), details={"delivery_id": ob.provision_delivery_id})
 
 
 def _transient(status: int) -> bool:

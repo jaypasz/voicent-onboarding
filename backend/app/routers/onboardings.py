@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import asdict
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from .. import aios_sync, magic_link, models as m, notifications, provision, services
+from .. import aios_sync, audit, magic_link, models as m, notifications, provision, services
 from .. import nudges as reminders
 from ..deps import Actor, Auth, Db, Org, Session
 from ..errors import NotFound
@@ -113,6 +114,7 @@ def list_links(onboarding_id: str, db: Session = Db, org: str = Org):
 @router.post("/{onboarding_id}/links", status_code=201)
 def issue_link(onboarding_id: str, body: LinkIn, request: Request, db: Session = Db, org: str = Org):
     raw, link = magic_link.issue_link(db, request.app.state.settings, org, onboarding_id, body.contact_id)
+    magic_link._audit(db, link, "link.issued", f"Issued a new link for {{name}}, valid until {link.expires_at.date().isoformat()}.")
     return _link_out(link) | {"url": _url(request, raw)}
 
 
@@ -257,6 +259,16 @@ def reminder_history(onboarding_id: str, db: Session = Db, org: str = Org):
     rows = db.scalars(select(m.Nudge).where(m.Nudge.onboarding_id == onboarding_id, m.Nudge.org_id == org).order_by(m.Nudge.created_at.desc()).limit(50))
     return [{"id": n.id, "contact": names.get(n.contact_id, ""), "channel": n.channel, "status": n.status, "round": n.round, "kind": n.template,
              "at": n.sent_at or n.created_at, "error": n.error} for n in rows]
+
+
+@router.get("/{onboarding_id}/activity")
+def activity(onboarding_id: str, before: dt.datetime | None = None, limit: int = 100, db: Session = Db, org: str = Org):
+    """The audit trail: every change to this onboarding, and to its client outside any onboarding, newest first. Page back
+    with `before` (the `at` of the last entry shown)."""
+    ob = services.get_onboarding(db, org, onboarding_id)
+    rows = audit.for_onboarding(db, org, ob, limit=max(1, min(limit, 200)), before=before)
+    return [{"id": r.id, "at": r.at, "actor_kind": r.actor_kind, "actor_label": r.actor_label, "action": r.action, "step_key": r.step_key,
+             "summary": r.summary, "about_client": r.onboarding_id is None} for r in rows]
 
 
 @router.get("/{onboarding_id}/sync")

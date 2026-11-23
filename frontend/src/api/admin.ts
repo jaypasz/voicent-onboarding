@@ -1,7 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { request } from './http'
 import type {
-  AppNotification, Client, Contact, Features, Me, Team, OnboardingDocument, OrgSettings, PreviewView, TemplateCheck, LinkInfo, NudgeResult, NudgeRow, OnboardingDetail, OnboardingStatus, OnboardingSummary, ProvisionStatus, SentOnboarding, SyncState, TemplateDetail,
+  AppNotification, AuditEntry, Client, Contact, Features, Me, Team, OnboardingDocument, OrgSettings, PreviewView, TemplateCheck, LinkInfo, NudgeResult, NudgeRow, OnboardingDetail, OnboardingStatus, OnboardingSummary, ProvisionStatus, SentOnboarding, SyncState, TemplateDetail,
   TemplateSummary, YamlImportResult, Task, TeamStepTask,
 } from './types'
 import type { SectionDoc, StepDoc, TemplateDoc } from '../builder/doc'
@@ -32,6 +32,15 @@ export const useOnboardings = (status?: OnboardingStatus | '', mine = false) => 
 export const useOnboarding = (id: string) => useQuery({ queryKey: k.onboarding(id), queryFn: () => request<OnboardingDetail>(`/onboardings/${id}`) })
 export const useFeatures = () => useQuery({ queryKey: ['features'], queryFn: () => request<Features>('/features'), staleTime: 60_000 })
 export const useNudgeHistory = (id: string) => useQuery({ queryKey: ['nudges', id], queryFn: () => request<NudgeRow[]>(`/onboardings/${id}/nudges`) })
+/** The audit trail, newest first, a page at a time ("Show older" asks for entries before the last one shown). */
+export const ACTIVITY_PAGE = 100
+export const useActivity = (id: string) => useInfiniteQuery({
+  queryKey: ['activity', id],
+  initialPageParam: '',
+  queryFn: ({ pageParam }) => request<AuditEntry[]>(`/onboardings/${id}/activity?limit=${ACTIVITY_PAGE}${pageParam ? `&before=${encodeURIComponent(pageParam)}` : ''}`),
+  getNextPageParam: (last) => (last.length < ACTIVITY_PAGE ? undefined : last[last.length - 1].at),
+  refetchOnMount: 'always',
+})
 export const useSyncStatus = (id: string) => useQuery({ queryKey: ['sync', id], queryFn: () => request<SyncState>(`/onboardings/${id}/sync`) })
 /** While a delivery is waiting or under way it is read again every few seconds, so its outcome shows without a reload. */
 export const PROVISION_POLL_MS = 5_000
