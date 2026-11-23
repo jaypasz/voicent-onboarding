@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from . import models as m
-from . import branding, changes, notifications, provision, stage_notices, stages
+from . import audit, branding, changes, notifications, provision, stage_notices, stages
 from .errors import Conflict, Invalid, NotFound
 from .redact import redact
 from .steps import registry
@@ -79,6 +79,9 @@ def update_org_settings(db: Session, org_id: str, fields: dict) -> m.Org:
             setattr(org, k, redact(fields[k]) if k in ("brand_name", "email_from_name") else fields[k])
     if "brand" in fields and fields["brand"] is not None:
         org.brand = branding.clean(fields["brand"])
+    changed = sorted(k for k in fields if fields[k] is not None)
+    if changed:
+        audit.record(db, org_id, "org.settings_changed", f"Changed the organization's settings: {', '.join(changed)}.", details={"fields": changed})
     db.flush()
     return org
 
@@ -122,6 +125,7 @@ def invite(db: Session, org_id: str, email: str, role: str, by: str) -> m.OrgInv
         row = m.OrgInvite(org_id=org_id, email=email)
         db.add(row)
     row.role, row.invited_by, row.accepted_at = role, by[:200], None
+    audit.record(db, org_id, "team.invited", f"Invited {email} as {role}.", details={"email": email, "role": role})
     db.flush()
     return row
 
@@ -130,6 +134,7 @@ def cancel_invite(db: Session, org_id: str, invite_id: str) -> None:
     row = db.scalar(select(m.OrgInvite).where(m.OrgInvite.id == invite_id, m.OrgInvite.org_id == org_id))
     if not row:
         raise NotFound("Invite not found.")
+    audit.record(db, org_id, "team.invite_cancelled", f"Cancelled the invite for {row.email}.", details={"email": row.email})
     db.delete(row)
     db.flush()
 
@@ -151,13 +156,17 @@ def change_member(db: Session, org_id: str, member_id: str, *, role: str | None 
         raise Conflict("This person's role comes from Voicent-App. Change it there.")
     if (remove or (role and role != "admin")) and row.role == "admin" and _admins_left(db, org_id, row.id) == 0:
         raise Conflict("The team needs at least one admin.")
+    who = row.name or row.email or "a team member"
     if remove:
+        audit.record(db, org_id, "team.removed", f"Removed {who} from the team.", details={"member_id": row.id})
         db.delete(row)
         db.flush()
         return None
     if role is not None:
         if role not in ROLES:
             raise Invalid(f"Role must be one of {', '.join(ROLES)}.")
+        if role != row.role:
+            audit.record(db, org_id, "team.role_changed", f"Changed {who}'s role from {row.role} to {role}.", details={"member_id": row.id, "from": row.role, "to": role})
         row.role = role
     db.flush()
     return row
@@ -175,12 +184,18 @@ def update_me(db: Session, org_id: str, member_id: str | None, *, notify_email: 
     return row
 
 
+def _member_name(db: Session, member_id: str | None) -> str:
+    row = db.get(m.OrgMember, member_id) if member_id else None
+    return (row.name or row.email or "a team member") if row else "a team member"
+
+
 def set_onboarding_owner(db: Session, org_id: str, onboarding_id: str, member_id: str | None, by_member_id: str | None) -> m.Onboarding:
     ob = _onboarding(db, org_id, onboarding_id)
     if member_id is not None:
         _member(db, org_id, member_id)
     if ob.owner_member_id != member_id:
         ob.owner_member_id = member_id
+        audit.record(db, org_id, "onboarding.owner_changed", f"Made {_member_name(db, member_id)} the owner." if member_id else "Removed the owner.", onboarding=ob)
         notifications.onboarding_owner_set(db, ob, by_member_id)
     db.flush()
     return ob
@@ -192,6 +207,7 @@ def set_step_team_assignee(db: Session, org_id: str, onboarding_id: str, key: st
         _member(db, org_id, member_id)
     if step.team_assignee_id != member_id:
         step.team_assignee_id = member_id
+        audit.record(db, org_id, "step.follower_changed", f"“{step.title}”: followed up by {_member_name(db, member_id)}." if member_id else f"“{step.title}”: no one follows it up now.", onboarding=ob, step_key=key)
         notifications.step_assignee_set(db, ob, step, by_member_id)
     db.flush()
     return step
@@ -228,6 +244,9 @@ def set_client_outcome(db: Session, org_id: str, client_id: str, outcome: str | 
     c = _client(db, org_id, client_id)
     if outcome is not None and c.paying_since:
         raise Conflict("This client is paying. Unmark them as paying first.")
+    if c.outcome != outcome:
+        audit.record(db, org_id, "client.outcome_changed", f"Marked {c.name} as {outcome}." if outcome else f"Took back the {c.outcome} mark on {c.name}.",
+                     client_id=c.id, details={"from": c.outcome, "to": outcome})
     c.outcome = outcome
     db.flush()
     return c
@@ -277,6 +296,7 @@ def create_task(db: Session, org_id: str, *, client_id: str, title: str, assigne
         _member(db, org_id, assignee_id)
     t = m.Task(org_id=org_id, client_id=client_id, title=redact(title.strip()), assignee_id=assignee_id, due_on=due_on)
     db.add(t)
+    audit.record(db, org_id, "task.created", f"Added the task “{t.title}”" + (f" for {_member_name(db, assignee_id)}" if assignee_id else "") + ".", client_id=client_id)
     db.flush()
     return t
 
@@ -292,14 +312,24 @@ def update_task(db: Session, org_id: str, task_id: str, fields: dict, at: dt.dat
         t.assignee_id = fields["assignee_id"]
     if "due_on" in fields:
         t.due_on = fields["due_on"]
+    was_done = t.done_at is not None
     if fields.get("done") is not None:
         t.done_at = (t.done_at or at) if fields["done"] else None
+    changed = sorted(k for k in fields if k != "done")
+    if t.done_at is not None and not was_done:
+        audit.record(db, org_id, "task.done", f"Finished the task “{t.title}”.", client_id=t.client_id)
+    elif t.done_at is None and was_done:
+        audit.record(db, org_id, "task.reopened", f"Reopened the task “{t.title}”.", client_id=t.client_id)
+    if changed:
+        audit.record(db, org_id, "task.changed", f"Changed the task “{t.title}”: {', '.join(c.replace('_id', '').replace('_on', ' date') for c in changed)}.", client_id=t.client_id, details={"fields": changed})
     db.flush()
     return t
 
 
 def delete_task(db: Session, org_id: str, task_id: str) -> None:
-    db.delete(_task(db, org_id, task_id))
+    t = _task(db, org_id, task_id)
+    audit.record(db, org_id, "task.deleted", f"Deleted the task “{t.title}”.", client_id=t.client_id)
+    db.delete(t)
     db.flush()
 
 
@@ -307,14 +337,18 @@ def create_client(db: Session, org_id: str, *, name: str, kind: str = "other", n
     c = m.Client(org_id=org_id, name=redact(name.strip()), kind=kind, notes=redact(notes), timezone=timezone)
     db.add(c)
     db.flush()
+    audit.record(db, org_id, "client.created", f"Added the client {c.name}.", client_id=c.id)
     return c
 
 
 def update_client(db: Session, org_id: str, client_id: str, **fields) -> m.Client:
     c = _client(db, org_id, client_id)
+    changed = sorted(k for k, v in fields.items() if v is not None)
     for k, v in fields.items():
         if v is not None:
             setattr(c, k, redact(v.strip()) if k in ("name", "notes") else v)
+    if changed:
+        audit.record(db, org_id, "client.changed", f"Changed the client's {', '.join(changed)}.", client_id=c.id, details={"fields": changed})
     db.flush()
     return c
 
@@ -336,11 +370,14 @@ def set_client_paying(db: Session, org_id: str, client_id: str, paying: bool, at
     if paying:
         if c.paying_since is None:
             c.paying_since = at
+            audit.record(db, org_id, "client.paying", f"Marked {c.name} as paying.", client_id=c.id)
         db.flush()
         for ob in obs:
             if ob.status == "completed" and provision.queue(ob, at):
                 queued.append(ob.id)
     else:
+        if c.paying_since is not None:
+            audit.record(db, org_id, "client.not_paying", f"Marked {c.name} as not paying.", client_id=c.id)
         c.paying_since = None
         for ob in obs:
             if ob.provision_state == "pending":
@@ -360,6 +397,11 @@ def add_contact(db: Session, org_id: str, client_id: str, *, name: str, email: s
     )
     db.add(c)
     db.flush()
+    audit.record(db, org_id, "contact.added", f"Added the contact {c.name}" + (f" ({c.role})" if c.role else "") + ".", client_id=client_id,
+                 details={"contact_id": c.id})
+    if sms_consent:
+        audit.record(db, org_id, "contact.sms_consent_given", f"Recorded {c.name}'s consent to texts (source: {c.sms_consent_source}).",
+                     client_id=client_id, details={"contact_id": c.id})
     return c
 
 
@@ -370,9 +412,12 @@ def update_contact(db: Session, org_id: str, client_id: str, contact_id: str, **
         raise NotFound("Contact not found.")
     consent = fields.pop("sms_consent", None)
     source = fields.pop("sms_consent_source", None)
+    changed = sorted(k for k, v in fields.items() if v is not None and (v.strip().lower() if k == "role" else v.strip()) != getattr(c, k))
     for k, v in fields.items():
         if v is not None:
             setattr(c, k, v.strip().lower() if k == "role" else v.strip())
+    if changed:
+        audit.record(db, org_id, "contact.changed", f"Changed {c.name}'s {', '.join(changed)}.", client_id=client_id, details={"contact_id": c.id, "fields": changed})
     if source is not None:
         c.sms_consent_source = source.strip()
     if consent is not None:
@@ -380,6 +425,10 @@ def update_contact(db: Session, org_id: str, client_id: str, contact_id: str, **
             raise Invalid("Say where the SMS consent came from.")
         if consent and not c.sms_consent:
             c.sms_consent_at = now()
+            audit.record(db, org_id, "contact.sms_consent_given", f"Recorded {c.name}'s consent to texts (source: {c.sms_consent_source}).",
+                         client_id=client_id, details={"contact_id": c.id})
+        elif not consent and c.sms_consent:
+            audit.record(db, org_id, "contact.sms_consent_withdrawn", f"Recorded that {c.name} no longer agrees to texts.", client_id=client_id, details={"contact_id": c.id})
         c.sms_consent = consent
         if not consent:
             c.sms_consent_at = None
@@ -435,6 +484,7 @@ def save_template(db: Session, org_id: str, document, *, created_by: str = "", c
         doc["version"] = 1
         v = m.TemplateVersion(org_id=org_id, template_id=t.id, version=1, document=doc, created_by=created_by)
         db.add(v)
+        audit.record(db, org_id, "template.created", f"Created the template “{t.name}”.", details={"template_id": t.id, "version": 1})
         db.flush()
         return t, v, True
     current = template_document(db, org_id, t)
@@ -445,6 +495,7 @@ def save_template(db: Session, org_id: str, document, *, created_by: str = "", c
     v = m.TemplateVersion(org_id=org_id, version=n, document=doc, created_by=created_by)
     t.versions.append(v)  # through the relationship, so t.versions is current when the router lists it
     t.current_version, t.name, t.archived = n, doc["name"], False
+    audit.record(db, org_id, "template.version_saved", f"Saved version {n} of the template “{t.name}”.", details={"template_id": t.id, "version": n})
     db.flush()
     return t, v, True
 
@@ -466,6 +517,9 @@ def install_presets(db: Session, org_id: str, created_by: str = "presets") -> li
 
 def archive_template(db: Session, org_id: str, template_id: str, archived: bool = True) -> m.Template:
     t = _template(db, org_id, template_id)
+    if t.archived != archived:
+        audit.record(db, org_id, "template.archived" if archived else "template.restored",
+                     f"{'Archived' if archived else 'Restored'} the template “{t.name}”.", details={"template_id": t.id})
     t.archived = archived
     db.flush()
     return t
@@ -532,8 +586,36 @@ def create_onboarding(db: Session, org_id: str, *, client_id: str, template_id: 
             org_id=org_id, key=s["key"], type=s["type"], title=s["title"], section=s["section"], position=i,
             visibility=s["visibility"], assignee_contact_id=_assignee(contacts, s["assignee_role"]),
         ))
+    custom = sections is not None or steps is not None
+    audit.record(db, org_id, "onboarding.created", f"Created this onboarding from the template “{t.name}” (version {tv.version})"
+                 + (", with steps customised for this client." if custom else "."), onboarding=ob,
+                 details={"template_id": t.id, "version": tv.version, "customised": custom})
     db.flush()
     return ob
+
+
+def _describe_edit(before: dict, after: dict) -> tuple[str, dict]:
+    """What an edit of an onboarding's steps did, in words: steps and stages added, removed or changed. Titles only."""
+    old, new = {d["key"]: d for d in before["steps"]}, {d["key"]: d for d in after["steps"]}
+    added = [new[k]["title"] for k in new if k not in old]
+    removed = [old[k]["title"] for k in old if k not in new]
+    changed = [new[k]["title"] for k in new if k in old and json.dumps(old[k], sort_keys=True) != json.dumps(new[k], sort_keys=True)]
+    old_s, new_s = {x["key"]: x for x in before.get("sections", [])}, {x["key"]: x for x in after.get("sections", [])}
+    stages_added = [new_s[k]["title"] for k in new_s if k not in old_s]
+    stages_removed = [old_s[k]["title"] for k in old_s if k not in new_s]
+    stages_changed = [new_s[k]["title"] for k in new_s if k in old_s and old_s[k] != new_s[k]]
+    reordered = [k for k in new if k in old] != [k for k in old if k in new] or list(new_s) != [k for k in old_s if k in new_s]
+    parts = []
+    for label, items in (("added", added), ("removed", removed), ("changed", changed)):
+        if items:
+            parts.append(f"{label} {', '.join(f'“{t}”' for t in items[:8])}{f' and {len(items) - 8} more' if len(items) > 8 else ''}")
+    for label, items in (("added the stage", stages_added), ("removed the stage", stages_removed), ("changed the stage", stages_changed)):
+        parts += [f"{label} “{t}”" for t in items]
+    if reordered:
+        parts.append("changed the order")
+    text = ("Edited the steps: " + "; ".join(parts) + ".") if parts else "Saved the steps with no changes."
+    return text, {"added": added, "removed": removed, "changed": changed, "stages_added": stages_added, "stages_removed": stages_removed,
+                  "stages_changed": stages_changed, "reordered": reordered}
 
 
 def _has_data(step: m.Step) -> bool:
@@ -562,6 +644,7 @@ def update_onboarding_steps(db: Session, org_id: str, onboarding_id: str, *, sec
         raise Conflict("These steps were changed by someone else after you opened them. Reload to see their changes, then make yours again.")
     sent = ob.status != "draft"
     seen_before = changes.snapshot(ob.document)
+    before_doc = copy.deepcopy(ob.document)
     doc = _with_steps(ob.document, sections, steps)
     wanted = {d["key"]: d for d in doc["steps"]}
     existing = {s.key: s for s in ob.steps}
@@ -597,6 +680,9 @@ def update_onboarding_steps(db: Session, org_id: str, onboarding_id: str, *, sec
     gone = {sec["key"] for sec in doc["sections"] if not stages.needs_signoff(sec)} | ({x.section_key for x in ob.signoffs} - {sec["key"] for sec in doc["sections"]})
     for row in [x for x in ob.signoffs if x.section_key in gone]:
         ob.signoffs.remove(row)  # a stage that was removed, or no longer needs one, keeps no sign-off to come back with
+    text, what = _describe_edit(before_doc, doc)
+    audit.record(db, org_id, "onboarding.steps_edited", text + ("" if notify_client or not sent else " The client wasn't told."), onboarding=ob,
+                 details={**what, "notify_client": notify_client if sent else None})
     ob.sync_version += 1
     db.flush()
     db.expire(ob, ["steps"])  # reload in position order
@@ -613,6 +699,7 @@ def _reconcile_status(db: Session, ob: m.Onboarding) -> None:
     Editing is not client activity, so the quiet-client timer is left alone."""
     if ob.status == "completed" and (any(s.status not in ("done", "skipped") for s in ob.steps) or not stages.all_signed_off(ob)):
         ob.status, ob.completed_at = "active", None
+        audit.record(db, ob.org_id, "onboarding.reopened", "Active again: the edit left something to do.", onboarding=ob, by=audit.SYSTEM)
     else:
         _complete_if_finished(db, ob)
     db.flush()
@@ -643,6 +730,7 @@ def send_onboarding(db: Session, org_id: str, onboarding_id: str) -> m.Onboardin
         if step.due_at is None and days is not None:  # a date picked on the draft stays; the rest count from now
             step.due_at = start + dt.timedelta(days=days)
     ob.status, ob.started_at, ob.last_activity_at = "active", start, start
+    audit.record(db, org_id, "onboarding.sent", "Sent the onboarding: it is under way.", onboarding=ob, at=start)
     ob.sync_version += 1
     db.flush()
     return ob
@@ -656,6 +744,9 @@ def set_onboarding_status(db: Session, org_id: str, onboarding_id: str, status: 
         raise Invalid(f"Can't set status to '{status}'.")
     if ob.status not in allowed[status]:
         raise Conflict(f"Can't go from {ob.status} to {status}.")
+    words = {"paused": ("onboarding.paused", "Paused the onboarding."), "active": ("onboarding.resumed", "Resumed the onboarding."),
+             "archived": ("onboarding.archived", "Archived the onboarding.")}[status]
+    audit.record(db, org_id, words[0], words[1], onboarding=ob, details={"from": ob.status})
     ob.status = status
     ob.last_activity_at = now()
     ob.sync_version += 1
@@ -673,12 +764,16 @@ def request_provisioning(db: Session, org_id: str, onboarding_id: str, at: dt.da
     if not (ob.client and ob.client.paying_since):
         raise Conflict(f"Mark {ob.client.name if ob.client else 'the client'} as a paying customer first. A Voicent workspace is only set up for paying customers.")
     provision.request_again(ob, at)
+    audit.record(db, org_id, "voicent.requested", "Asked Voicent-App to set up the workspace.", onboarding=ob)
     db.flush()
     return ob
 
 
 def set_nudges_paused(db: Session, org_id: str, onboarding_id: str, paused: bool) -> m.Onboarding:
     ob = _onboarding(db, org_id, onboarding_id)
+    if ob.nudges_paused != paused:
+        audit.record(db, org_id, "reminders.paused" if paused else "reminders.resumed",
+                     "Paused automatic reminders." if paused else "Turned automatic reminders back on.", onboarding=ob)
     ob.nudges_paused = paused
     db.flush()
     return ob
@@ -719,12 +814,34 @@ def submit_step(db: Session, org_id: str, onboarding_id: str, key: str, data, *,
         _check_uploaded_files(step, cleaned, _step_config(ob, key), storage)
     step.responses.append(m.Response(
         org_id=org_id, revision=len(step.responses) + 1, data=cleaned, submitted_by=submitted_by, submitted_at=now()))
+    before = step.status
     _set_step_status(ob, step, stype.resulting_status(_step_config(ob, key), cleaned))
+    n = len(step.responses)
+    audit.record(db, org_id, "step.answered", f"“{step.title}”: {_answer_words(step, cleaned)}" + (f" (version {n})" if n > 1 else "") + ".",
+                 onboarding=ob, step_key=key, details={"revision": n, "from": before, "to": step.status})
     if actor_kind == "client":
         ob.attention = None  # they're back, so whatever was worrying us isn't true any more
         notifications.client_answered(db, ob, step, submitted_by)
     _after_change(db, ob)
     return step
+
+
+def _answer_words(step: m.Step, d: dict) -> str:
+    """What an answer was, without what it said."""
+    if step.type == "approval":
+        return "approved it" if d.get("decision") == "approved" else "asked for changes"
+    if step.type == "connect":
+        return "connected the account" if d.get("status") == "connected" else "asked for help connecting"
+    if step.type == "book_call":
+        return "booked the call" if d.get("booked") else "said the call isn't booked yet"
+    if step.type == "task":
+        return "marked it done" if d.get("done") else f"ticked {len(d.get('checked', []))} item(s)"
+    if step.type == "upload":
+        k = len(d.get("file_ids", []))
+        return f"sent {k} file{'s' if k != 1 else ''}" if k else "said there is nothing to upload"
+    if step.type == "info_video":
+        return "watched or read it"
+    return "filled it in"
 
 
 def _check_uploaded_files(step: m.Step, cleaned: dict, config: dict, storage) -> None:
@@ -773,6 +890,7 @@ def complete_step(db: Session, org_id: str, onboarding_id: str, key: str) -> m.S
     ob, step = _step(db, org_id, onboarding_id, key)
     if ob.status in ("completed", "archived"):
         raise Conflict(f"This onboarding is {ob.status}.")
+    audit.record(db, org_id, "step.completed", f"Marked “{step.title}” done.", onboarding=ob, step_key=key, details={"from": step.status})
     _set_step_status(ob, step, "done")
     _after_change(db, ob)
     return step
@@ -782,6 +900,7 @@ def skip_step(db: Session, org_id: str, onboarding_id: str, key: str) -> m.Step:
     ob, step = _step(db, org_id, onboarding_id, key)
     if ob.status in ("completed", "archived"):
         raise Conflict(f"This onboarding is {ob.status}.")
+    audit.record(db, org_id, "step.skipped", f"Skipped “{step.title}”.", onboarding=ob, step_key=key, details={"from": step.status})
     _set_step_status(ob, step, "skipped")
     _after_change(db, ob)
     return step
@@ -791,9 +910,11 @@ def reopen_step(db: Session, org_id: str, onboarding_id: str, key: str) -> m.Ste
     ob, step = _step(db, org_id, onboarding_id, key)
     if ob.status == "archived":
         raise Conflict("This onboarding is archived.")
+    audit.record(db, org_id, "step.reopened", f"Reopened “{step.title}”.", onboarding=ob, step_key=key, details={"from": step.status})
     _set_step_status(ob, step, "in_progress" if step.responses else "pending")
     if ob.status == "completed":
         ob.status, ob.completed_at = "active", None
+        audit.record(db, org_id, "onboarding.reopened", "Active again: a step was reopened.", onboarding=ob, by=audit.SYSTEM)
     _after_change(db, ob)
     return step
 
@@ -817,6 +938,7 @@ def _after_change(db: Session, ob: m.Onboarding) -> None:
 def _complete_if_finished(db: Session, ob: m.Onboarding) -> None:
     if ob.status == "active" and ob.steps and all(s.status in ("done", "skipped") for s in ob.steps) and stages.all_signed_off(ob):
         ob.status, ob.completed_at = "completed", now()
+        audit.record(db, ob.org_id, "onboarding.completed", "Finished: every step is done or skipped and every stage signed off.", onboarding=ob, by=audit.SYSTEM)
         if ob.client_id:  # wait for, then re-read, a payment being marked at this moment (see set_client_paying)
             db.scalar(select(m.Client).where(m.Client.id == ob.client_id).with_for_update().execution_options(populate_existing=True))
         provision.queue(ob, ob.completed_at)  # sent after the response by provision.kick, or by the timer
@@ -854,8 +976,13 @@ def set_step_schedule(db: Session, org_id: str, onboarding_id: str, key: str, *,
     if start_on and due and start_on > due:
         raise Invalid("The start date is after the due date.", ["Start: pick a day on or before the due date."])
     tz = ob.client.timezone if ob.client else "UTC"
+    old_start, old_due = step.start_on, due_on(step, tz)
     step.start_on = start_on
     step.due_at = end_of_day(due, tz) if due else None
+    if (old_start, old_due) != (start_on, due):
+        fmt = lambda d: d.isoformat() if d else "none"  # noqa: E731
+        audit.record(db, org_id, "step.scheduled", f"“{step.title}”: starts {fmt(start_on)}, due {fmt(due)} (was {fmt(old_start)}, {fmt(old_due)}).",
+                     onboarding=ob, step_key=key, details={"start_on": fmt(start_on), "due_on": fmt(due), "was_start_on": fmt(old_start), "was_due_on": fmt(old_due)})
     ob.sync_version += 1  # the due date goes to AIOS
     db.flush()
     return step
@@ -886,6 +1013,8 @@ def sign_off_stage(db: Session, org_id: str, onboarding_id: str, key: str, *, me
     db.flush()
     opened = [x.key for x in stages.stages(ob) if x.key in was_locked and x.state != "locked"
               and any(s.visibility == "client" and s.status not in stages.FINISHED for s in x.steps)]
+    audit.record(db, org_id, "stage.signed_off", f"Signed off the stage “{st.title}”" + (f", which opened {', '.join(f'“{x.title}”' for x in stages.stages(ob) if x.key in was_locked and x.state != 'locked')}" if any(x.key in was_locked and x.state != "locked" for x in stages.stages(ob)) else "") + ".",
+                 onboarding=ob, details={"stage": key})
     stage_notices.note_opened(ob, opened, now())  # the client hears about it shortly (stage_notices.py)
     notifications.stage_signed_off(db, ob, st.title, member_id)
     _after_change(db, ob)
@@ -900,6 +1029,9 @@ def withdraw_signoff(db: Session, org_id: str, onboarding_id: str, key: str) -> 
     row = next((x for x in ob.signoffs if x.section_key == key), None)
     if row is None:
         raise NotFound("That stage isn't signed off.")
+    title = next((sec["title"] for sec in ob.document.get("sections", []) if sec["key"] == key), key)
+    audit.record(db, org_id, "stage.signoff_withdrawn", f"Withdrew the sign-off of “{title}” (it was signed off by {row.signed_by}); the stages after it are locked again.",
+                 onboarding=ob, details={"stage": key})
     ob.signoffs.remove(row)
     db.flush()
     stage_notices.forget_locked(ob)  # a stage locked again is no news to send
@@ -919,5 +1051,8 @@ def add_comment(db: Session, org_id: str, onboarding_id: str, key: str, *, body:
                       body=body, client_visible=client_visible if author_kind == "admin" else True)
     step.comments.append(c)
     ob.last_activity_at = now()
+    kind = "a note for the team" if author_kind == "admin" and not client_visible else "a comment"
+    audit.record(db, org_id, "step.commented", f"Left {kind} on “{step.title}”.", onboarding=ob, step_key=key,
+                 details={"client_visible": c.client_visible})  # never the comment's text
     db.flush()
     return c

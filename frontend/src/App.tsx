@@ -5,6 +5,7 @@ import ClientDetail from './admin/ClientDetail'
 import ClientsPage from './admin/ClientsPage'
 import NewOnboardingPage from './admin/NewOnboardingPage'
 import OnboardingDetail from './admin/OnboardingDetail'
+import OnboardingActivityPage from './admin/OnboardingActivityPage'
 import OnboardingFollowUpPage from './admin/OnboardingFollowUpPage'
 import OnboardingLayout from './admin/OnboardingLayout'
 import OnboardingPreviewPage from './admin/OnboardingPreviewPage'
@@ -41,6 +42,7 @@ export default function App() {
               <Route path="steps" element={<OnboardingStepsPage />} />
               <Route path="preview" element={<OnboardingPreviewPage />} />
               <Route path="follow-up" element={<OnboardingFollowUpPage />} />
+              <Route path="activity" element={<OnboardingActivityPage />} />
             </Route>
             <Route path="clients" element={<ClientsPage />} />
             <Route path="clients/:id" element={<ClientDetail />} />

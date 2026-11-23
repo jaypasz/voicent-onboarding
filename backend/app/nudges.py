@@ -20,7 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from . import branding, magic_link, notifications, stages
+from . import audit, branding, magic_link, notifications, stages
 from . import models as m
 from .config import Settings, valid_timezone
 from .errors import Conflict
@@ -123,6 +123,9 @@ def _recently_failed(db: Session, ob: m.Onboarding, contact: m.Contact, now: dt.
     return bool(last and last.status == "failed" and _aware(last.created_at) > now - dt.timedelta(hours=hours))
 
 
+CHANNEL_WORDS = {"sms": "text", "email": "email"}
+
+
 def _nudge_contact(db, settings, notifier, ob, client, contact, steps, round_no, now, manual, dry_run, app_url) -> Outcome:
     quiet = in_quiet_hours(now, client.timezone, settings.nudge_quiet_start, settings.nudge_quiet_end, settings.default_timezone)
     chans, why = _channels(settings, contact, quiet, manual)
@@ -150,15 +153,23 @@ def _nudge_contact(db, settings, notifier, ob, client, contact, steps, round_no,
             result = notifier.send_sms(address, msg["sms"], sender=branding.sms_from(org, settings))
         else:
             result = notifier.send_email(address, msg["subject"], msg["text"], msg["html"], sender=branding.email_from(org, settings), reply_to=branding.reply_to(org))
+        by = None if manual else audit.system("Reminders")  # a manual one is by whoever pressed the button
+        kind = "a reminder" if manual else f"automatic reminder {round_no}"
         if result.ok:
             row.status, row.sent_at = "sent", now
+            audit.record(db, ob.org_id, "reminder.sent", f"Sent {kind} to {contact.name} by {CHANNEL_WORDS[channel]}.", onboarding=ob, by=by, at=now,
+                         details={"contact_id": contact.id, "channel": channel, "round": round_no, "manual": manual})
             db.flush()
             return Outcome(contact.name, "sent", channel=channel)
         row.status, row.error = "failed", result.reason[:300]
         link.revoked_at = now  # nobody received this link
+        audit.record(db, ob.org_id, "reminder.failed", f"Couldn't send {kind} to {contact.name} by {CHANNEL_WORDS[channel]}; its link was cancelled.",
+                     onboarding=ob, by=by, at=now, details={"contact_id": contact.id, "channel": channel, "round": round_no, "manual": manual})  # never the provider's text
         if result.opted_out:
             contact.sms_consent, contact.sms_consent_at = False, None
             contact.sms_consent_source = f"replied STOP ({now.date().isoformat()})"
+            audit.record(db, ob.org_id, "contact.sms_consent_withdrawn", f"{contact.name} replied STOP, so they get no more texts.", onboarding=ob,
+                         by=audit.system("Twilio"), at=now, details={"contact_id": contact.id})
         last_reason = result.reason
         db.flush()
     return Outcome(contact.name, "failed", channel=chans[-1][0], reason=last_reason)
@@ -218,6 +229,8 @@ def run_nudges(sm: sessionmaker, settings: Settings, notifier: Notifier, now: dt
                     summary.details.append(f"{ob.title}: no reply after {rounds} reminders")
                     if not dry_run:  # a dry run changes nothing, so the next real pass still flags it and tells the owner
                         ob.attention = "nudges_exhausted"
+                        audit.record(db, ob.org_id, "reminders.gave_up", f"No reply after {rounds} automatic reminders: flagged for the team, no more automatic reminders.",
+                                     onboarding=ob, by=audit.system("Reminders"), at=now)
                         notifications.client_gone_quiet(db, ob, rounds)
                         db.commit()
                 continue
@@ -230,6 +243,8 @@ def run_nudges(sm: sessionmaker, settings: Settings, notifier: Notifier, now: dt
             if not dry_run:
                 if outcomes and all(o.status == "skipped" for o in outcomes) and ob.attention != "unreachable":
                     ob.attention = "unreachable"
+                    audit.record(db, ob.org_id, "reminders.unreachable", "Nobody with steps left can be reminded (no consent to texts and no email): flagged for the team.",
+                                 onboarding=ob, by=audit.system("Reminders"), at=now)
                     summary.flagged += 1
                 elif sent and ob.attention == "unreachable":
                     ob.attention = None

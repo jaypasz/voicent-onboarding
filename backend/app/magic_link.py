@@ -72,6 +72,8 @@ def _link(db: Session, org_id: str, onboarding_id: str, link_id: str) -> m.Magic
 
 def revoke_link(db: Session, org_id: str, onboarding_id: str, link_id: str) -> m.MagicLink:
     link = _link(db, org_id, onboarding_id, link_id)
+    if link.revoked_at is None:
+        _audit(db, link, "link.revoked", "Revoked {name}'s link: it no longer opens the onboarding.")
     link.revoked_at = link.revoked_at or now()
     db.flush()
     return link
@@ -84,8 +86,18 @@ def extend_link(db: Session, org_id: str, onboarding_id: str, link_id: str, days
     if link.revoked_at is not None:
         raise Conflict("A revoked link can't be extended; issue a new one.")
     link.expires_at = max(_aware(link.expires_at), now()) + dt.timedelta(days=days)
+    _audit(db, link, "link.extended", f"Extended {{name}}'s link by {days} day{'s' if days != 1 else ''}, to {_aware(link.expires_at).date().isoformat()}.")
     db.flush()
     return link
+
+
+def _audit(db: Session, link: m.MagicLink, action: str, text: str) -> None:
+    """An entry about a link: whose it is and what happened to it. Never the token, which isn't kept anyway."""
+    from . import audit
+
+    contact = db.get(m.Contact, link.contact_id)
+    ob = db.get(m.Onboarding, link.onboarding_id)
+    audit.record(db, link.org_id, action, text.format(name=contact.name if contact else "a contact"), onboarding=ob, details={"link_id": link.id})
 
 
 # ---------------------------------------------------------------- client side
