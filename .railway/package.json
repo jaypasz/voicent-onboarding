@@ -1,0 +1,8 @@
+{
+  "name": "voicent-onboarding-railway",
+  "private": true,
+  "description": "Railway infrastructure as code for this repo. Only used by `railway config plan` / `apply`; not part of the app build.",
+  "devDependencies": {
+    "railway": "3.17.0"
+  }
+}
