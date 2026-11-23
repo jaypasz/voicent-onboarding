@@ -3,6 +3,7 @@ import ApprovalStep from './ApprovalStep'
 import BookCallStep from './BookCallStep'
 import ConnectStep from './ConnectStep'
 import FormStep from './FormStep'
+import InfoVideoStep from './InfoVideoStep'
 import TaskStep from './TaskStep'
 import UploadStep from './UploadStep'
 import type { StepProps } from './types'
@@ -15,6 +16,7 @@ const RENDERERS: Record<string, ComponentType<StepProps>> = {
   book_call: BookCallStep,
   approval: ApprovalStep,
   task: TaskStep,
+  info_video: InfoVideoStep,
 }
 
 export function rendererFor(type: string): ComponentType<StepProps> {

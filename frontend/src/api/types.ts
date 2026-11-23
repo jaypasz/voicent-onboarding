@@ -36,6 +36,19 @@ export interface FormField {
 
 // ------------------------------------------------------------------ client portal
 
+/** A link from another tool, as the server describes it. `embed_url` is built by the server from the ids it parsed, never the
+ * address the template gave; null when the provider can't be shown inside a page (it is then a link). */
+export interface ExternalLink {
+  provider: 'loom' | 'youtube' | 'vimeo' | 'figma' | 'google_doc' | 'google_sheet' | 'google_slides' | 'google_drive' | 'notion' | 'link' | string
+  kind: string
+  href: string
+  embed_url: string | null
+}
+
+export interface Resource extends ExternalLink {
+  label: string
+}
+
 export interface PortalStep {
   key: string
   type: StepType
@@ -52,6 +65,10 @@ export interface PortalStep {
   /** In a stage that opens once the one before it is signed off: readable, not answerable. */
   locked?: boolean
   config: Record<string, any>
+  /** Links shown with the step. */
+  resources?: Resource[]
+  /** What a "Watch or read" step shows. */
+  media?: ExternalLink | null
   assignee: { id: string; name: string; is_you: boolean } | null
   can_write: boolean
   response: Record<string, any> | null
@@ -219,6 +236,8 @@ export interface AdminStep {
   locked?: boolean
   completed_at: string | null
   config: Record<string, any>
+  resources?: Resource[]
+  media?: ExternalLink | null
   response: { revision: number; data: Record<string, any>; submitted_by: string; submitted_at: string } | null
   revisions: number
   files: FileRef[]

@@ -14,6 +14,8 @@ const PATHS: Record<string, string> = {
   grip: 'M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01',
   form: 'M5 4h14v16H5zM8 9h8M8 13h8M8 17h5',
   upload: 'M12 16V4M7 9l5-5 5 5M4 20h16',
+  info_video: 'M3 5h18v14H3zM10 9l5 3-5 3z',
+  link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
   approval: 'M5 12l4 4 10-10',
   book_call: 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4',
   connect: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',

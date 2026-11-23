@@ -8,6 +8,7 @@ from pathlib import Path
 import yaml
 
 from ..errors import TemplateInvalid
+from .. import embeds
 from ..steps import registry
 from ..steps.base import schema_problems
 
@@ -32,6 +33,9 @@ def validate_document(doc) -> list[str]:
         seen.add(step["key"])
         if step.get("section") and step["section"] not in section_keys:
             problems.append(f"{where}.section: '{step['section']}' isn't one of the template's sections.")
+        for j, r in enumerate(step.get("resources") or []):
+            if embeds.describe(r["url"]) is None:
+                problems.append(f"{where}.resources[{j}].url: use a plain https address (no user name, password or port).")
         stype = registry.get(step["type"])
         if stype is None:
             known = ", ".join(t.type for t in registry.all_types() if t.implemented)
@@ -63,6 +67,7 @@ def normalise(doc: dict) -> dict:
         step.setdefault("due_offset_days", None)
         step.setdefault("config", {})
         step.setdefault("show_if", None)
+        step.setdefault("resources", [])
     return out
 
 

@@ -46,7 +46,16 @@ export interface StepDoc extends Meta {
   due_offset_days?: number | null
   config: Record<string, any>
   show_if?: unknown
+  /** Links shown with the step (a Loom, a Figma file, a Drive folder). */
+  resources?: ResourceDoc[]
 }
+
+export interface ResourceDoc extends Meta {
+  label?: string
+  url: string
+}
+
+export const MAX_RESOURCES = 10
 
 export interface TemplateDoc {
   name: string
@@ -67,7 +76,7 @@ export interface StepKind {
   make: () => Record<string, any>
 }
 
-/** What can be dragged in. Declared-but-unbuilt types (credential_share, info_video, payment_link) are left out, as the server refuses them. */
+/** What can be dragged in. Declared-but-unbuilt types (credential_share, payment_link) are left out, as the server refuses them. */
 export const STEP_KINDS: StepKind[] = [
   { type: 'form', label: 'Form', help: 'Questions the client answers', make: () => ({ fields: [{ _fresh: true, key: 'your_answer', label: 'Your answer', type: 'text', required: true }] }) },
   { type: 'upload', label: 'File upload', help: 'Documents, logos, photos', make: () => ({ accept: ['pdf', 'png', 'jpg'], max_files: 5 }) },
@@ -75,6 +84,7 @@ export const STEP_KINDS: StepKind[] = [
   { type: 'book_call', label: 'Book a call', help: 'A link to your booking page', make: () => ({ url: '', duration_minutes: 30 }) },
   { type: 'connect', label: 'Connect an account', help: 'Record that access was given', make: () => ({ provider: 'account', label: 'Your account', access_mode: 'delegated' }) },
   { type: 'task', label: 'Task', help: 'Something to do, for the client or for you', make: () => ({ audience: 'client', checklist: [] }) },
+  { type: 'info_video', label: 'Watch or read', help: 'A Loom, video, Figma file or doc', make: () => ({ url: '' }) },
 ]
 
 export const kindOf = (type: string): StepKind | undefined => STEP_KINDS.find((k) => k.type === type)
@@ -127,6 +137,13 @@ export function clean(steps: StepDoc[]): StepDoc[] {
   return steps.map((s) => {
     const out = strip(s) as StepDoc
     if (s.type === 'form' && Array.isArray(s.config?.fields)) out.config = { ...s.config, fields: s.config.fields.map((f: FieldDoc) => strip(f)) }
+    if (s.resources) {
+      // A row left blank is dropped; an empty label is left out, so the server names the link by what it is.
+      out.resources = s.resources.filter((r) => r.url.trim() || r.label?.trim()).map((r) => {
+        const { label, url } = strip(r) as ResourceDoc
+        return label?.trim() ? { label: label.trim(), url: url.trim() } : { url: url.trim() }
+      })
+    }
     return out
   })
 }

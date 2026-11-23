@@ -38,6 +38,8 @@ def snapshot(document: dict) -> list[dict]:
         if d.get("visibility", "client") != "client":
             continue
         shape = {k: d.get(k) for k in ("type", "title", "description", "config", "assignee_role", "section")}
+        if d.get("resources"):  # only when there are some, so documents from before resources existed keep their fingerprint
+            shape["resources"] = d["resources"]
         out.append({"key": d["key"], "title": d.get("title", ""), "sig": hashlib.sha1(json.dumps(shape, sort_keys=True, default=str).encode()).hexdigest()[:12]})
     return out
 

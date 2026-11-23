@@ -38,7 +38,18 @@
           "assignee_role": {"type": "string", "maxLength": 40},
           "due_offset_days": {"type": ["integer", "null"], "minimum": 0, "maximum": 365},
           "config": {"type": "object"},
-          "show_if": {"type": ["object", "null"]}
+          "show_if": {"type": ["object", "null"]},
+          "resources": {
+            "type": "array", "maxItems": 10,
+            "description": "Links shown with the step (a Loom, a Figma file, a Drive folder, a Notion page). Shown inside the step when the provider allows it.",
+            "items": {
+              "type": "object", "additionalProperties": false, "required": ["url"],
+              "properties": {
+                "label": {"type": "string", "maxLength": 120},
+                "url": {"type": "string", "pattern": "^https://\\S+$", "maxLength": 500}
+              }
+            }
+          }
         }
       }
     }
